@@ -13,4 +13,4 @@ window.APP_ACCOUNT_EMAIL = "toegang@fit-planner.app";
 // Public VAPID key for Web Push (safe to expose client-side, like the anon key).
 // Generate a keypair with: npx web-push generate-vapid-keys
 // The PRIVATE key goes into the send-reminders Edge Function's secrets, never here.
-window.VAPID_PUBLIC_KEY = "your-vapid-public-key";
+window.VAPID_PUBLIC_KEY = "BOTmYKo4mVUjxSkQMdZaJuhrMv9N3k2gWREYwUQHPcB-WlOrWIdQvaWmxK4U__Nzvi4xjz6apHIBBH27eDM6LUQ";
