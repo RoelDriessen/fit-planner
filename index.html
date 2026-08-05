@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f172a">
+<title>Fit Planner</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <h1>Fit Planner</h1>
+    <div class="auth-tabs" id="authTabs">
+      <button type="button" class="auth-tab active" data-mode="signin">Inloggen</button>
+      <button type="button" class="auth-tab" data-mode="signup">Code instellen</button>
+    </div>
+    <form id="authForm" class="auth-form">
+      <input id="authPassword" type="password" placeholder="Toegangscode (min. 6 tekens)" required autocomplete="current-password" minlength="6">
+      <button type="submit" id="authSubmit">Inloggen</button>
+    </form>
+    <p class="auth-message" id="authMessage"></p>
+  </div>
+</div>
+
+<div class="app" id="app" hidden>
+  <header class="header">
+    <h1>Fit Planner</h1>
+    <div class="header-right">
+      <span class="user-email" id="userEmail"></span>
+      <button class="logout-btn" id="logoutBtn">Uitloggen</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <button class="sidebar-item active" data-view="today">Vandaag</button>
+      <button class="sidebar-item" data-view="week">Deze week</button>
+      <button class="sidebar-item" data-view="exercises">Oefeningen</button>
+      <button class="sidebar-item" data-view="settings">Instellingen</button>
+    </aside>
+
+    <main class="main">
+      <!-- ---------- Vandaag ---------- -->
+      <section id="todayView" class="view">
+        <div class="stats-header" id="statsHeader">
+          <div class="stat-block level-block">
+            <span class="stat-label">Level</span>
+            <span class="stat-value" id="levelValue">1</span>
+          </div>
+          <div class="stat-block points-block">
+            <span class="stat-label"><span id="levelProgressText">0 / 100</span> punten</span>
+            <div class="progress-bar"><div class="progress-fill" id="levelProgressFill"></div></div>
+          </div>
+          <div class="stat-block streak-block">
+            <span class="stat-label">Streak</span>
+            <span class="stat-value" id="streakValue">0<span class="stat-unit">dagen</span></span>
+          </div>
+        </div>
+
+        <h2 class="view-title" id="todayTitle">Vandaag</h2>
+        <ul class="session-list" id="todaySessionList"></ul>
+        <p class="empty-state" id="todayEmptyState">Niets gepland voor vandaag. Ga naar "Deze week" om iets te plannen.</p>
+      </section>
+
+      <!-- ---------- Deze week ---------- -->
+      <section id="weekView" class="view" hidden>
+        <div class="week-nav">
+          <button type="button" id="weekPrevBtn" aria-label="Vorige week">‹</button>
+          <span class="week-label" id="weekLabel"></span>
+          <button type="button" id="weekNextBtn" aria-label="Volgende week">›</button>
+          <button type="button" id="weekTodayBtn" class="week-today-btn">Deze week</button>
+        </div>
+        <button type="button" id="copyPrevWeekBtn" class="copy-week-btn">Kopieer vorige week</button>
+
+        <div class="week-days" id="weekDays"></div>
+      </section>
+
+      <!-- ---------- Oefeningen ---------- -->
+      <section id="exercisesView" class="view" hidden>
+        <h2 class="view-title">Oefeningen</h2>
+
+        <nav class="filters tag-filters" id="exerciseCategoryFilters"></nav>
+
+        <form id="addExerciseCategoryForm" class="add-category-form">
+          <input id="addExerciseCategoryInput" type="text" placeholder="Nieuwe categorie (bv. Rug, Heup, Knie, Sport)..." autocomplete="off">
+          <button type="submit" aria-label="Categorie toevoegen">+</button>
+        </form>
+
+        <form id="addExerciseForm" class="add-form">
+          <select id="addExerciseCategorySelect" aria-label="Categorie"></select>
+          <input id="addExerciseInput" type="text" placeholder="Nieuwe oefening of sport..." autocomplete="off" required>
+          <button type="submit" aria-label="Toevoegen">+</button>
+        </form>
+
+        <ul class="exercise-list" id="exerciseList"></ul>
+        <p class="empty-state" id="exerciseEmptyState">Nog geen oefeningen. Voeg er hierboven een toe.</p>
+      </section>
+
+      <!-- ---------- Instellingen ---------- -->
+      <section id="settingsView" class="view" hidden>
+        <h2 class="view-title">Instellingen</h2>
+
+        <form id="settingsForm" class="settings-form">
+          <section class="settings-section">
+            <h3>Herinneringen</h3>
+
+            <label class="settings-row">
+              <span>Tijdzone (IANA, bv. Europe/Amsterdam)</span>
+              <input id="settingsTimezone" type="text" autocomplete="off">
+            </label>
+
+            <label class="settings-row checkbox-row">
+              <input id="settingsDailyEnabled" type="checkbox">
+              <span>Dagelijkse herinnering</span>
+            </label>
+            <label class="settings-row">
+              <span>Tijdstip</span>
+              <input id="settingsDailyTime" type="time">
+            </label>
+
+            <label class="settings-row checkbox-row">
+              <input id="settingsWeeklyEnabled" type="checkbox">
+              <span>Wekelijkse planningsherinnering</span>
+            </label>
+            <label class="settings-row">
+              <span>Dag</span>
+              <select id="settingsWeeklyDay">
+                <option value="1">Maandag</option>
+                <option value="2">Dinsdag</option>
+                <option value="3">Woensdag</option>
+                <option value="4">Donderdag</option>
+                <option value="5">Vrijdag</option>
+                <option value="6">Zaterdag</option>
+                <option value="0">Zondag</option>
+              </select>
+            </label>
+            <label class="settings-row">
+              <span>Tijdstip</span>
+              <input id="settingsWeeklyTime" type="time">
+            </label>
+
+            <button type="submit" class="settings-save-btn">Opslaan</button>
+            <p class="settings-message" id="settingsMessage"></p>
+          </section>
+        </form>
+
+        <section class="settings-section">
+          <h3>Pushmeldingen</h3>
+          <p class="settings-hint" id="pushHint"></p>
+          <button type="button" id="enablePushBtn" class="settings-save-btn">Meldingen inschakelen op dit toestel</button>
+          <ul class="device-list" id="deviceList"></ul>
+        </section>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="exerciseModalOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="exerciseModal">
+    <button class="modal-close" id="exerciseModalClose" aria-label="Sluiten">×</button>
+
+    <input id="exerciseModalName" class="modal-title" type="text" placeholder="Naam van de oefening/sport...">
+
+    <div class="modal-row">
+      <select id="exerciseModalCategory" aria-label="Categorie"></select>
+    </div>
+
+    <section class="modal-section">
+      <h3>Details</h3>
+      <div class="exercise-detail-grid">
+        <label>
+          <span>Sets</span>
+          <input id="exerciseModalSets" type="number" min="0" step="1">
+        </label>
+        <label>
+          <span>Reps</span>
+          <input id="exerciseModalReps" type="number" min="0" step="1">
+        </label>
+        <label>
+          <span>Duur (min)</span>
+          <input id="exerciseModalDuration" type="number" min="0" step="1">
+        </label>
+        <label>
+          <span>Punten</span>
+          <input id="exerciseModalPoints" type="number" min="0" step="1">
+        </label>
+      </div>
+    </section>
+
+    <section class="modal-section">
+      <h3>Notities</h3>
+      <textarea id="exerciseModalNotes" rows="3" placeholder="Uitvoering, aandachtspunten..."></textarea>
+    </section>
+
+    <section class="modal-section">
+      <h3>Video</h3>
+      <input id="exerciseModalVideoUrl" type="url" placeholder="YouTube-, Vimeo- of directe videolink..." autocomplete="off">
+      <div class="video-embed-wrap" id="exerciseModalVideoEmbed"></div>
+    </section>
+
+    <section class="modal-section">
+      <h3>Foto's</h3>
+      <div class="attachments" id="exerciseAttachments"></div>
+      <label class="attachment-upload">
+        <input type="file" id="exerciseAttachmentInput" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple hidden>
+        <span>+ Foto toevoegen (PNG, JPG)</span>
+      </label>
+      <p class="attachment-error" id="exerciseAttachmentError"></p>
+    </section>
+
+    <div class="modal-actions">
+      <button type="button" id="exerciseModalArchiveBtn" class="modal-secondary-btn"></button>
+      <button type="button" id="exerciseModalDeleteBtn" class="modal-danger-btn">Verwijderen</button>
+    </div>
+  </div>
+</div>
+
+<div id="lightboxOverlay" class="lightbox-overlay" hidden>
+  <button class="modal-close lightbox-close" id="lightboxClose" aria-label="Sluiten">×</button>
+  <div class="lightbox-content" id="lightboxContent"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
