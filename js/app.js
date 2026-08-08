@@ -228,16 +228,58 @@ function showAuth() {
   appEl.hidden = true;
 }
 
+// Active profile is remembered on-device for a couple of hours (sliding —
+// each successful restore pushes the expiry forward again), not forever: a
+// short-lived PIN-free window rather than either "ask every single app open"
+// (too much friction in practice — iOS can reload a standalone PWA's page,
+// and therefore its in-memory state, surprisingly often on its own) or
+// "remembered indefinitely" (defeats the point of a per-person PIN).
+const PROFILE_SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const PROFILE_SESSION_STORAGE_KEY = "fitPlanner.activeProfile";
+
+function saveProfileSession(appUserId) {
+  localStorage.setItem(PROFILE_SESSION_STORAGE_KEY, JSON.stringify({
+    appUserId, expiresAt: Date.now() + PROFILE_SESSION_TTL_MS,
+  }));
+}
+
+function loadStoredProfileId() {
+  const raw = localStorage.getItem(PROFILE_SESSION_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed?.appUserId || !parsed?.expiresAt || parsed.expiresAt <= Date.now()) {
+      localStorage.removeItem(PROFILE_SESSION_STORAGE_KEY);
+      return null;
+    }
+    return parsed.appUserId;
+  } catch (err) {
+    localStorage.removeItem(PROFILE_SESSION_STORAGE_KEY);
+    return null;
+  }
+}
+
+function clearStoredProfileSession() {
+  localStorage.removeItem(PROFILE_SESSION_STORAGE_KEY);
+}
+
 // Household login succeeded — this normally only ever happens once per
 // device/browser, since Supabase persists the session (localStorage +
 // auto-refresh) across app opens on its own; the "Toegangscode" screen isn't
 // shown again after that. Load the data shared by the whole household
-// (categories/exercises/profiles), then always show the profile picker —
-// deliberately never skipped/remembered, so a PIN is required every session.
+// (categories/exercises/profiles), then either silently restore a
+// still-valid remembered profile or show the picker.
 async function showApp() {
   authScreen.hidden = true;
   await Promise.all([loadExerciseCategories(), loadExercises(), loadAppUsers()]);
-  showProfilePicker();
+  const storedId = loadStoredProfileId();
+  if (storedId && appUsers.some(u => u.id === storedId)) {
+    currentAppUserId = storedId;
+    saveProfileSession(storedId); // slide the 2-hour window forward
+    await enterApp();
+  } else {
+    showProfilePicker();
+  }
 }
 
 // Only once a profile is active do we load that profile's own data and start
@@ -321,6 +363,7 @@ profileCodeForm.addEventListener("submit", async (e) => {
     return;
   }
   currentAppUserId = u.id;
+  saveProfileSession(u.id);
   await enterApp();
 });
 
@@ -364,10 +407,12 @@ newProfileForm.addEventListener("submit", async (e) => {
   }
   await loadAppUsers();
   currentAppUserId = id;
+  saveProfileSession(id);
   await enterApp();
 });
 
 switchProfileBtn.addEventListener("click", () => {
+  clearStoredProfileSession();
   currentAppUserId = null;
   teardownRealtime();
   appEl.hidden = true;
@@ -455,6 +500,7 @@ function setupRealtime() {
         await loadAppUsers();
         if (currentAppUserId && !appUsers.some(u => u.id === currentAppUserId)) {
           // Our profile was deleted from another device — bail out to the picker.
+          clearStoredProfileSession();
           currentAppUserId = null;
           teardownRealtime();
           appEl.hidden = true;
