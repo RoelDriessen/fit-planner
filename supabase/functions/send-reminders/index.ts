@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isWithinBucket, localParts } from "./timeWindow.ts";
 import { sendPush } from "./sendPush.ts";
-import type { PushSubscriptionRow, SessionRow, UserSettingsRow } from "./types.ts";
+import type { PushSubscriptionRow, UserSettingsRow } from "./types.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,12 +20,42 @@ async function sendToAll(
   subscriptions: PushSubscriptionRow[],
   payload: Record<string, unknown>,
 ) {
+  let sent = 0;
+  let failed = 0;
   for (const sub of subscriptions) {
     const result = await sendPush(sub, payload);
-    if (!result.ok && result.expired) {
-      await admin.from("push_subscriptions").delete().eq("id", sub.id);
+    if (result.ok) {
+      sent++;
+    } else {
+      failed++;
+      if (result.expired) await admin.from("push_subscriptions").delete().eq("id", sub.id);
     }
   }
+  return { sent, failed };
+}
+
+// Builds the daily reminder body with the actual planned routines (name +
+// time), not just a count — falls back to the "nothing planned" message when
+// there's nothing in status 'planned' for that date.
+async function buildDailyReminderBody(admin: SupabaseClient, appUserId: string, dateStr: string): Promise<string> {
+  const { data, error } = await admin
+    .from("sessions")
+    .select("scheduled_time, status, routines(name)")
+    .eq("app_user_id", appUserId)
+    .eq("scheduled_date", dateStr)
+    .eq("status", "planned")
+    .order("scheduled_time", { ascending: true, nullsFirst: false });
+
+  if (error) console.error(`buildDailyReminderBody query failed for app_user_id=${appUserId}: ${error.message}`);
+
+  const items = (data ?? []) as { scheduled_time: string | null; routines: { name: string } | null }[];
+  if (!items.length) return "Niets gepland voor vandaag — misschien nog iets inplannen?";
+
+  const parts = items.map((s) => {
+    const name = s.routines?.name ?? "Verwijderde routine";
+    return s.scheduled_time ? `${name} (${s.scheduled_time.slice(0, 5)})` : name;
+  });
+  return `Vandaag: ${parts.join(", ")}`;
 }
 
 // Manually-triggered "send me a test push right now" path, used by the two
@@ -65,23 +95,18 @@ async function handleTestMode(req: Request, admin: SupabaseClient, body: Record<
   if (type === "daily") {
     const { data: userSettings } = await admin.from("user_settings").select("timezone").eq("app_user_id", appUserId).maybeSingle();
     const dateStr = localParts(new Date(), (userSettings as { timezone?: string } | null)?.timezone || "Europe/Amsterdam").dateStr;
-    const { data: todaySessions } = await admin
-      .from("sessions")
-      .select("id, app_user_id, scheduled_date, status")
-      .eq("app_user_id", appUserId)
-      .eq("scheduled_date", dateStr);
-    const plannedCount = ((todaySessions ?? []) as SessionRow[]).filter((s) => s.status === "planned").length;
-    pushBody = plannedCount > 0
-      ? `Vandaag staat er ${plannedCount} sessie${plannedCount === 1 ? "" : "s"} gepland.`
-      : "Niets gepland voor vandaag — misschien nog iets inplannen?";
+    pushBody = await buildDailyReminderBody(admin, appUserId, dateStr);
   } else {
     pushBody = "Tijd om je nieuwe week te plannen!";
   }
 
-  await sendToAll(admin, subscriptions, { title: "Fit Planner (TEST)", body: pushBody, url: "./" });
+  const { sent, failed } = await sendToAll(admin, subscriptions, { title: "Fit Planner (TEST)", body: pushBody, url: "./" });
   // Deliberately does NOT touch last_daily_reminder_sent_date/last_weekly_reminder_sent_date
   // so a test send can never suppress or interfere with the real scheduled send.
-  return jsonResponse({ ok: true, sent_to: subscriptions.length });
+  if (sent === 0) {
+    return jsonResponse({ ok: false, error: `Versturen naar alle ${failed} toestel(len) is mislukt — check de Edge Function-logs.` });
+  }
+  return jsonResponse({ ok: true, sent_to: sent, failed });
 }
 
 // Invoked on a schedule by pg_cron/pg_net (see the commented block at the end
@@ -130,21 +155,12 @@ Deno.serve(async (req) => {
         settings.last_daily_reminder_sent_date !== dateStr &&
         isWithinBucket(timeStr, settings.daily_reminder_time)
       ) {
-        const { data: todaySessions } = await admin
-          .from("sessions")
-          .select("id, app_user_id, scheduled_date, status")
-          .eq("app_user_id", settings.app_user_id)
-          .eq("scheduled_date", dateStr);
-        const plannedCount = ((todaySessions ?? []) as SessionRow[]).filter((s) => s.status === "planned").length;
-        const body2 = plannedCount > 0
-          ? `Vandaag staat er ${plannedCount} sessie${plannedCount === 1 ? "" : "s"} gepland.`
-          : "Niets gepland voor vandaag — misschien nog iets inplannen?";
-
-        await sendToAll(admin, subscriptions, { title: "Fit Planner", body: body2, url: "./" });
+        const body2 = await buildDailyReminderBody(admin, settings.app_user_id, dateStr);
+        const { sent, failed } = await sendToAll(admin, subscriptions, { title: "Fit Planner", body: body2, url: "./" });
         await admin.from("user_settings")
           .update({ last_daily_reminder_sent_date: dateStr })
           .eq("app_user_id", settings.app_user_id);
-        results.push({ app_user_id: settings.app_user_id, sent: "daily" });
+        results.push({ app_user_id: settings.app_user_id, sent: "daily", delivered: sent, failed });
       }
 
       if (
@@ -153,7 +169,7 @@ Deno.serve(async (req) => {
         settings.last_weekly_reminder_sent_date !== dateStr &&
         isWithinBucket(timeStr, settings.weekly_reminder_time)
       ) {
-        await sendToAll(admin, subscriptions, {
+        const { sent, failed } = await sendToAll(admin, subscriptions, {
           title: "Fit Planner",
           body: "Tijd om je nieuwe week te plannen!",
           url: "./",
@@ -161,7 +177,7 @@ Deno.serve(async (req) => {
         await admin.from("user_settings")
           .update({ last_weekly_reminder_sent_date: dateStr })
           .eq("app_user_id", settings.app_user_id);
-        results.push({ app_user_id: settings.app_user_id, sent: "weekly" });
+        results.push({ app_user_id: settings.app_user_id, sent: "weekly", delivered: sent, failed });
       }
     }
 

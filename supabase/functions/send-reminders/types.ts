@@ -17,10 +17,3 @@ export interface PushSubscriptionRow {
   p256dh: string;
   auth_key: string;
 }
-
-export interface SessionRow {
-  id: string;
-  app_user_id: string;
-  scheduled_date: string;
-  status: string;
-}

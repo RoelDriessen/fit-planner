@@ -15,10 +15,15 @@ export interface PushTarget {
 export interface SendResult {
   ok: boolean;
   expired: boolean;
+  error?: string;
 }
 
 // Sends one Web Push message. `expired` is true on a 404/410 from the push
 // service, meaning the subscription is dead and its row should be deleted.
+// Failures are logged (with the endpoint host only, not the full endpoint —
+// it's effectively a bearer credential for that subscription) so a silent
+// delivery failure shows up in `supabase functions logs send-reminders`
+// instead of just vanishing.
 export async function sendPush(sub: PushTarget, payload: Record<string, unknown>): Promise<SendResult> {
   try {
     await webpush.sendNotification(
@@ -28,6 +33,10 @@ export async function sendPush(sub: PushTarget, payload: Record<string, unknown>
     return { ok: true, expired: false };
   } catch (err) {
     const status = (err as { statusCode?: number })?.statusCode;
-    return { ok: false, expired: status === 404 || status === 410 };
+    const message = (err as Error)?.message ?? String(err);
+    let host = "unknown-endpoint";
+    try { host = new URL(sub.endpoint).host; } catch { /* keep default */ }
+    console.error(`sendPush failed for ${host}: status=${status ?? "n/a"} message=${message}`);
+    return { ok: false, expired: status === 404 || status === 410, error: message };
   }
 }
