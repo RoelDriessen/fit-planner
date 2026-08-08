@@ -35,6 +35,7 @@ let activeRoutineId = null;
 let workoutSession = null; // the sessions row a workout-in-progress will mark done
 let workoutSequence = []; // flattened [{exerciseId, reps, round, totalRounds}, ...]
 let workoutStepIndex = 0;
+let workoutMediaMode = "video"; // "video" | "image" — which one the current step is showing, when both exist
 const signedUrlCache = new Map(); // storage_path -> { url, expiresAt } — shared by thumbnails, modal attachments, and the workout player
 
 // ---------- elements ----------
@@ -101,6 +102,7 @@ const exerciseEmptyState = document.getElementById("exerciseEmptyState");
 const settingsView = document.getElementById("settingsView");
 const currentProfileHint = document.getElementById("currentProfileHint");
 const switchProfileBtn = document.getElementById("switchProfileBtn");
+const settingsMediaPreference = document.getElementById("settingsMediaPreference");
 const settingsForm = document.getElementById("settingsForm");
 const settingsTimezone = document.getElementById("settingsTimezone");
 const settingsDailyEnabled = document.getElementById("settingsDailyEnabled");
@@ -143,14 +145,15 @@ const addRoutineExerciseSelect = document.getElementById("addRoutineExerciseSele
 const addRoutineExerciseReps = document.getElementById("addRoutineExerciseReps");
 const routineModalArchiveBtn = document.getElementById("routineModalArchiveBtn");
 const routineModalDeleteBtn = document.getElementById("routineModalDeleteBtn");
-const routineModalStartBtn = document.getElementById("routineModalStartBtn");
 
 const workoutOverlay = document.getElementById("workoutOverlay");
 const workoutCloseBtn = document.getElementById("workoutCloseBtn");
 const workoutRoutineName = document.getElementById("workoutRoutineName");
 const workoutProgressText = document.getElementById("workoutProgressText");
 const workoutProgressFill = document.getElementById("workoutProgressFill");
+const workoutMediaToggle = document.getElementById("workoutMediaToggle");
 const workoutMedia = document.getElementById("workoutMedia");
+const workoutRotateHint = document.getElementById("workoutRotateHint");
 const workoutExerciseName = document.getElementById("workoutExerciseName");
 const workoutReps = document.getElementById("workoutReps");
 const workoutNotes = document.getElementById("workoutNotes");
@@ -417,6 +420,13 @@ switchProfileBtn.addEventListener("click", () => {
   teardownRealtime();
   appEl.hidden = true;
   showProfilePicker();
+});
+
+settingsMediaPreference.addEventListener("change", async () => {
+  if (!currentAppUserId) return;
+  await sb.from("user_settings").update({ preferred_workout_media: settingsMediaPreference.value }).eq("app_user_id", currentAppUserId);
+  await loadUserSettings();
+  renderAll();
 });
 
 // ---------- data loading ----------
@@ -1003,19 +1013,9 @@ routineModalDeleteBtn.addEventListener("click", () => {
 });
 
 routineList.addEventListener("click", (e) => {
-  const startBtn = e.target.closest(".routine-start-btn");
-  if (startBtn) {
-    e.stopPropagation();
-    startRoutineWorkout(startBtn.dataset.id);
-    return;
-  }
   const li = e.target.closest(".exercise-item");
   if (!li) return;
   openRoutineModal(li.dataset.id);
-});
-
-routineModalStartBtn.addEventListener("click", () => {
-  if (activeRoutineId) startRoutineWorkout(activeRoutineId);
 });
 
 // ---------- routine-exercises (oefeningen binnen een routine) ----------
@@ -1094,30 +1094,16 @@ function buildWorkoutSequence(routine, items) {
   return sequence;
 }
 
-async function startRoutineWorkout(routineId) {
-  const routine = routineById(routineId);
+// Starting is always from an already-planned session (Dashboard or Deze week),
+// not from the routine definition itself — so there's no "find or create
+// today's session" guesswork here, unlike an earlier version of this function.
+function startSessionWorkout(sessionId) {
+  const s = sessions.find(x => x.id === sessionId);
+  if (!s || !s.routine_id) return;
+  const routine = routineById(s.routine_id);
   if (!routine) return;
-  const items = routineExercisesFor(routineId);
+  const items = routineExercisesFor(routine.id);
   if (!items.length) return;
-
-  // Reuse today's already-planned session for this routine if one exists,
-  // so a workout started from a day you'd already scheduled doesn't create
-  // a duplicate — otherwise create one on the fly, same as planning it
-  // yourself would, just started immediately instead of for later.
-  const todayStr = toDateStr(new Date());
-  let s = sessions.find(x => x.routine_id === routineId && x.scheduled_date === todayStr && x.status === "planned");
-  if (!s) {
-    const { data, error } = await sb.from("sessions").insert({
-      user_id: session.user.id,
-      app_user_id: currentAppUserId,
-      routine_id: routineId,
-      scheduled_date: todayStr,
-      status: "planned",
-    }).select().maybeSingle();
-    if (error || !data) return;
-    await loadSessions();
-    s = sessions.find(x => x.id === data.id) || data;
-  }
 
   workoutSession = s;
   workoutSequence = buildWorkoutSequence(routine, items);
@@ -1168,25 +1154,58 @@ function renderWorkoutStep() {
   workoutNotes.hidden = !ex?.notes;
   workoutNotes.textContent = ex?.notes || "";
 
-  workoutMedia.innerHTML = "";
-  if (ex?.video_url) {
-    workoutMedia.innerHTML = videoEmbedHtml(ex.video_url);
-  } else if (ex) {
-    const att = firstImageAttachmentFor(ex.id);
-    if (att) {
-      getSignedUrl(att.storage_path).then(url => {
-        // Guard against a stale async response landing after the user already
-        // moved to a different step (or closed the player) while it was loading.
-        if (url && workoutSequence[workoutStepIndex] === step && !workoutOverlay.hidden) {
-          workoutMedia.innerHTML = `<img src="${url}" alt="">`;
-        }
-      });
-    }
-  }
+  const hasVideo = !!ex?.video_url;
+  const att = ex ? firstImageAttachmentFor(ex.id) : null;
+  const hasImage = !!att;
+
+  // Which one to show first: the profile's preference, falling back to
+  // whichever of the two is actually available for this exercise.
+  let mode = userSettings?.preferred_workout_media === "image" ? "image" : "video";
+  if (mode === "video" && !hasVideo && hasImage) mode = "image";
+  if (mode === "image" && !hasImage && hasVideo) mode = "video";
+  workoutMediaMode = mode;
+
+  workoutMediaToggle.hidden = !(hasVideo && hasImage);
+  updateWorkoutMediaToggleActive();
+  renderWorkoutMedia(ex, hasVideo, att);
+  workoutRotateHint.hidden = !(hasVideo || hasImage);
 
   workoutNextBtn.textContent = workoutStepIndex === workoutSequence.length - 1 ? "Klaar — voltooien" : "Klaar, volgende";
   workoutBackBtn.disabled = workoutStepIndex === 0;
 }
+
+function updateWorkoutMediaToggleActive() {
+  workoutMediaToggle.querySelectorAll(".workout-media-toggle-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.mode === workoutMediaMode);
+  });
+}
+
+function renderWorkoutMedia(ex, hasVideo, att) {
+  const step = workoutSequence[workoutStepIndex];
+  workoutMedia.innerHTML = "";
+  if (workoutMediaMode === "video" && hasVideo) {
+    workoutMedia.innerHTML = videoEmbedHtml(ex.video_url);
+  } else if (workoutMediaMode === "image" && att) {
+    getSignedUrl(att.storage_path).then(url => {
+      // Guard against a stale async response landing after the user already
+      // moved to a different step, toggled media mode, or closed the player.
+      if (url && workoutSequence[workoutStepIndex] === step && workoutMediaMode === "image" && !workoutOverlay.hidden) {
+        workoutMedia.innerHTML = `<img src="${url}" alt="">`;
+      }
+    });
+  }
+}
+
+workoutMediaToggle.addEventListener("click", (e) => {
+  const btn = e.target.closest(".workout-media-toggle-btn");
+  if (!btn || btn.classList.contains("active")) return;
+  const step = workoutSequence[workoutStepIndex];
+  if (!step) return;
+  const ex = exerciseById(step.exerciseId);
+  workoutMediaMode = btn.dataset.mode;
+  updateWorkoutMediaToggleActive();
+  renderWorkoutMedia(ex, !!ex?.video_url, ex ? firstImageAttachmentFor(ex.id) : null);
+});
 
 workoutCloseBtn.addEventListener("click", closeWorkout);
 workoutNextBtn.addEventListener("click", workoutNext);
@@ -1261,7 +1280,8 @@ todaySessionList.addEventListener("click", (e) => {
   const li = e.target.closest(".session-item");
   if (!li) return;
   const id = li.dataset.id;
-  if (e.target.closest(".done-btn")) toggleSessionStatus(id, "done");
+  if (e.target.closest(".start-btn")) startSessionWorkout(id);
+  else if (e.target.closest(".done-btn")) toggleSessionStatus(id, "done");
   else if (e.target.closest(".skip-btn")) toggleSessionStatus(id, "skipped");
   else if (e.target.closest(".session-delete")) deleteSession(id);
 });
@@ -1287,7 +1307,8 @@ weekDays.addEventListener("click", (e) => {
   const item = e.target.closest(".day-session-item");
   if (!item) return;
   const id = item.dataset.id;
-  if (e.target.closest(".done-btn")) toggleSessionStatus(id, "done");
+  if (e.target.closest(".start-btn")) startSessionWorkout(id);
+  else if (e.target.closest(".done-btn")) toggleSessionStatus(id, "done");
   else if (e.target.closest(".skip-btn")) toggleSessionStatus(id, "skipped");
 });
 
@@ -1482,6 +1503,7 @@ function renderToday() {
         <div class="session-meta">${badges.join("")}</div>
       </div>
       <div class="session-actions">
+        ${s.status === "planned" ? `<button type="button" class="session-action-btn start-btn" aria-label="Starten">▶</button>` : ""}
         <button type="button" class="session-action-btn done-btn${s.status === "done" ? " active" : ""}" aria-label="Klaar">✓</button>
         <button type="button" class="session-action-btn skip-btn${s.status === "skipped" ? " active" : ""}" aria-label="Overslaan">✕</button>
       </div>
@@ -1510,6 +1532,7 @@ function renderWeek() {
         <span class="name">${escapeHtml(r ? r.name : "Verwijderde routine")}</span>
         ${s.scheduled_time ? `<span class="time">${formatTime(s.scheduled_time)}</span>` : ""}
         <div class="day-session-actions">
+          ${s.status === "planned" ? `<button type="button" class="day-session-action-btn start-btn" aria-label="Starten">▶</button>` : ""}
           <button type="button" class="day-session-action-btn done-btn${s.status === "done" ? " active" : ""}" aria-label="Klaar">✓</button>
           <button type="button" class="day-session-action-btn skip-btn${s.status === "skipped" ? " active" : ""}" aria-label="Overslaan">✕</button>
         </div>
@@ -1665,7 +1688,6 @@ function renderRoutines() {
         <span class="exercise-name">${escapeHtml(r.name)}</span>
         <div class="session-meta">${badges.join("")}</div>
       </div>
-      ${!r.archived && count > 0 ? `<button type="button" class="routine-start-btn" data-id="${r.id}">▶ Starten</button>` : ""}
     </li>`;
   }).join("");
   routineEmptyState.classList.toggle("visible", sorted.length === 0);
@@ -1694,8 +1716,6 @@ function renderRoutineModal() {
 
   const activeExercises = exercises.filter(e => !e.archived);
   addRoutineExerciseSelect.innerHTML = activeExercises.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("");
-
-  routineModalStartBtn.hidden = items.length === 0;
 }
 
 function shortenUserAgent(ua) {
@@ -1707,6 +1727,7 @@ function renderSettings() {
   currentProfileHint.textContent = profile ? `Ingelogd als ${profile.name}.` : "";
 
   if (!userSettings) return;
+  settingsMediaPreference.value = userSettings.preferred_workout_media || "video";
   if (document.activeElement !== settingsTimezone) settingsTimezone.value = userSettings.timezone;
   settingsDailyEnabled.checked = userSettings.daily_reminder_enabled;
   if (document.activeElement !== settingsDailyTime) settingsDailyTime.value = formatTime(userSettings.daily_reminder_time);

@@ -83,8 +83,11 @@ create table if not exists user_settings (
   weekly_reminder_time time not null default '18:00',
   last_daily_reminder_sent_date date,
   last_weekly_reminder_sent_date date,
+  preferred_workout_media text not null default 'video' check (preferred_workout_media in ('video', 'image')),
   updated_at timestamptz not null default now()
 );
+-- Safety net for projects that ran an earlier version of this file before preferred_workout_media existed.
+alter table user_settings add column if not exists preferred_workout_media text not null default 'video' check (preferred_workout_media in ('video', 'image'));
 
 create table if not exists push_subscriptions (
   id uuid primary key default gen_random_uuid(),

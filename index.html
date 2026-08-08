@@ -37,7 +37,7 @@
     <div class="profile-code-prompt" id="profileCodePrompt" hidden>
       <p class="profile-code-name" id="profileCodePromptName"></p>
       <form id="profileCodeForm" class="auth-form">
-        <input id="profileCodeInput" type="password" placeholder="Code" required autocomplete="off">
+        <input id="profileCodeInput" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="Code" required autocomplete="off">
         <button type="submit">Verder</button>
       </form>
       <button type="button" class="modal-secondary-btn" id="profileCodeCancelBtn">Terug</button>
@@ -47,8 +47,8 @@
 
     <form id="newProfileForm" class="auth-form" hidden>
       <input id="newProfileName" type="text" placeholder="Naam" required autocomplete="off">
-      <input id="newProfileCode" type="password" placeholder="Code (min. 4 tekens)" required autocomplete="off" minlength="4">
-      <input id="newProfileCodeConfirm" type="password" placeholder="Code herhalen" required autocomplete="off" minlength="4">
+      <input id="newProfileCode" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="Code (min. 4 tekens)" required autocomplete="off" minlength="4">
+      <input id="newProfileCodeConfirm" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="Code herhalen" required autocomplete="off" minlength="4">
       <button type="submit">Profiel aanmaken</button>
       <button type="button" class="modal-secondary-btn" id="newProfileCancelBtn">Annuleren</button>
     </form>
@@ -153,6 +153,17 @@
           <h3>Profiel</h3>
           <p class="settings-hint" id="currentProfileHint"></p>
           <button type="button" class="settings-save-btn" id="switchProfileBtn">Wissel gebruiker</button>
+        </section>
+
+        <section class="settings-section">
+          <h3>Workout-weergave</h3>
+          <label class="settings-row">
+            <span>Toon standaard</span>
+            <select id="settingsMediaPreference">
+              <option value="video">Video</option>
+              <option value="image">Afbeelding</option>
+            </select>
+          </label>
         </section>
 
         <form id="settingsForm" class="settings-form">
@@ -302,8 +313,6 @@
       </form>
     </section>
 
-    <button type="button" id="routineModalStartBtn" class="workout-start-btn">▶ Starten</button>
-
     <div class="modal-actions">
       <button type="button" id="routineModalArchiveBtn" class="modal-secondary-btn"></button>
       <button type="button" id="routineModalDeleteBtn" class="modal-danger-btn">Verwijderen</button>
@@ -323,7 +332,14 @@
     </div>
 
     <div class="workout-content">
-      <div class="workout-media" id="workoutMedia"></div>
+      <div class="workout-media-col">
+        <div class="workout-media-toggle" id="workoutMediaToggle" hidden>
+          <button type="button" class="workout-media-toggle-btn" data-mode="video">🎥 Video</button>
+          <button type="button" class="workout-media-toggle-btn" data-mode="image">🖼 Foto</button>
+        </div>
+        <div class="workout-media" id="workoutMedia"></div>
+        <p class="workout-rotate-hint" id="workoutRotateHint" hidden>Kantel je toestel voor een breder beeld</p>
+      </div>
       <div class="workout-info">
         <h2 class="workout-exercise-name" id="workoutExerciseName"></h2>
         <span class="workout-reps" id="workoutReps" hidden></span>
