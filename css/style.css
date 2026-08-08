@@ -518,20 +518,19 @@ body {
 
 .week-days {
   display: flex;
+  flex-direction: column;
   gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 8px;
 }
 
 .day-card {
-  flex: 0 0 240px;
+  width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .day-card.is-today {
@@ -540,17 +539,24 @@ body {
 
 .day-card-header {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .day-card-weekday {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .day-card-date {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
+}
+
+.day-card.is-today .day-card-weekday {
+  color: var(--accent);
 }
 
 .day-sessions {
@@ -636,10 +642,26 @@ body {
   background: var(--accent);
   border: none;
   color: white;
-  padding: 8px;
+  padding: 8px 14px;
   border-radius: 10px;
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+@media (min-width: 480px) {
+  .day-add-form {
+    flex-direction: row;
+  }
+
+  .day-add-form select {
+    flex: 1;
+  }
+
+  .day-add-form input {
+    width: 110px;
+    flex-shrink: 0;
+  }
 }
 
 /* ---------- routine-exercise list (inside routine modal) ---------- */
@@ -712,18 +734,6 @@ body {
 
 .routine-exercise-item .remove:hover {
   color: var(--danger);
-}
-
-@media (min-width: 720px) {
-  .week-days {
-    overflow-x: visible;
-    flex-wrap: wrap;
-  }
-
-  .day-card {
-    flex: 1 1 0;
-    min-width: 0;
-  }
 }
 
 /* ---------- filters / chips (shared: exercise categories) ---------- */
