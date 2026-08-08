@@ -36,6 +36,9 @@ let workoutSession = null; // the sessions row a workout-in-progress will mark d
 let workoutSequence = []; // flattened [{exerciseId, reps, round, totalRounds}, ...]
 let workoutStepIndex = 0;
 let workoutMediaMode = "video"; // "video" | "image" — which one the current step is showing, when both exist
+let exercisePickerCategoryFilter = null;
+let exercisePickerSearchTerm = "";
+let exercisePickerSelectedExerciseId = null; // null = step 1 (search/browse), set = step 2 (reps entry)
 const signedUrlCache = new Map(); // storage_path -> { url, expiresAt } — shared by thumbnails, modal attachments, and the workout player
 
 // ---------- elements ----------
@@ -140,11 +143,22 @@ const routineModalSets = document.getElementById("routineModalSets");
 const routineModalPoints = document.getElementById("routineModalPoints");
 const routineModalNotes = document.getElementById("routineModalNotes");
 const routineExerciseList = document.getElementById("routineExerciseList");
-const addRoutineExerciseForm = document.getElementById("addRoutineExerciseForm");
-const addRoutineExerciseSelect = document.getElementById("addRoutineExerciseSelect");
-const addRoutineExerciseReps = document.getElementById("addRoutineExerciseReps");
+const openExercisePickerBtn = document.getElementById("openExercisePickerBtn");
 const routineModalArchiveBtn = document.getElementById("routineModalArchiveBtn");
 const routineModalDeleteBtn = document.getElementById("routineModalDeleteBtn");
+
+const exercisePickerOverlay = document.getElementById("exercisePickerOverlay");
+const exercisePickerClose = document.getElementById("exercisePickerClose");
+const exercisePickerStepList = document.getElementById("exercisePickerStepList");
+const exercisePickerSearchInput = document.getElementById("exercisePickerSearch");
+const exercisePickerCategoryFiltersEl = document.getElementById("exercisePickerCategoryFilters");
+const exercisePickerListEl = document.getElementById("exercisePickerList");
+const exercisePickerEmptyStateEl = document.getElementById("exercisePickerEmptyState");
+const exercisePickerStepReps = document.getElementById("exercisePickerStepReps");
+const exercisePickerBackBtn = document.getElementById("exercisePickerBackBtn");
+const exercisePickerRepsNameEl = document.getElementById("exercisePickerRepsName");
+const exercisePickerRepsInput = document.getElementById("exercisePickerRepsInput");
+const exercisePickerAddBtn = document.getElementById("exercisePickerAddBtn");
 
 const workoutOverlay = document.getElementById("workoutOverlay");
 const workoutCloseBtn = document.getElementById("workoutCloseBtn");
@@ -743,7 +757,8 @@ exerciseModalOverlay.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!exerciseModalOverlay.hidden) closeExerciseModal();
+  if (!exercisePickerOverlay.hidden) closeExercisePicker();
+  else if (!exerciseModalOverlay.hidden) closeExerciseModal();
   else if (!routineModalOverlay.hidden) closeRoutineModal();
 });
 
@@ -965,6 +980,7 @@ function openRoutineModal(id) {
 function closeRoutineModal() {
   activeRoutineId = null;
   routineModalOverlay.hidden = true;
+  closeExercisePicker(); // the picker only makes sense nested inside an open routine modal
 }
 
 routineModalClose.addEventListener("click", closeRoutineModal);
@@ -1019,20 +1035,116 @@ routineList.addEventListener("click", (e) => {
 });
 
 // ---------- routine-exercises (oefeningen binnen een routine) ----------
-addRoutineExerciseForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
+// Adding an exercise is a two-step picker (search/filter -> pick -> reps),
+// not a flat dropdown — with a real exercise library that dropdown becomes
+// unusable fast. Reuses the same category-chip and card-list conventions as
+// the main Oefeningen view.
+function openExercisePicker() {
   if (!activeRoutineId) return;
-  const exerciseId = addRoutineExerciseSelect.value;
-  if (!exerciseId) return;
-  const reps = parseIntOrNull(addRoutineExerciseReps.value);
+  exercisePickerCategoryFilter = null;
+  exercisePickerSearchTerm = "";
+  exercisePickerSelectedExerciseId = null;
+  exercisePickerSearchInput.value = "";
+  exercisePickerStepList.hidden = false;
+  exercisePickerStepReps.hidden = true;
+  exercisePickerOverlay.hidden = false;
+  renderExercisePicker();
+  exercisePickerSearchInput.focus();
+}
+
+function closeExercisePicker() {
+  exercisePickerOverlay.hidden = true;
+  exercisePickerSelectedExerciseId = null;
+}
+
+function renderExercisePicker() {
+  exercisePickerCategoryFiltersEl.innerHTML = exerciseCategories.map(c => {
+    const active = exercisePickerCategoryFilter === c.id;
+    return `<button type="button" class="filter-btn${active ? " active" : ""}" data-id="${c.id}" style="--cat-color:${c.color}">${escapeHtml(c.name)}</button>`;
+  }).join("");
+
+  const term = exercisePickerSearchTerm.trim().toLowerCase();
+  const existingIds = new Set(routineExercisesFor(activeRoutineId).map(re => re.exercise_id));
+  const filtered = exercises.filter(e => {
+    if (e.archived) return false;
+    if (exercisePickerCategoryFilter && e.category_id !== exercisePickerCategoryFilter) return false;
+    if (term && !`${e.name} ${e.notes || ""}`.toLowerCase().includes(term)) return false;
+    return true;
+  });
+
+  exercisePickerListEl.innerHTML = filtered.map(e => {
+    const cat = categoryById(e.category_id);
+    const alreadyAdded = existingIds.has(e.id);
+    const thumb = firstImageAttachmentFor(e.id);
+    return `<li class="exercise-item${alreadyAdded ? " already-added" : ""}" data-id="${e.id}">
+      ${thumb ? `<div class="exercise-thumb" data-path="${escapeHtml(thumb.storage_path)}"></div>` : ""}
+      <div class="exercise-main">
+        <span class="exercise-name">${escapeHtml(e.name)}</span>
+        ${cat ? `<div class="session-meta"><span class="meta-badge cat" style="--cat-color:${cat.color}">${escapeHtml(cat.name)}</span></div>` : ""}
+      </div>
+      ${alreadyAdded ? `<span class="already-added-badge" title="Al in deze routine">✓</span>` : ""}
+    </li>`;
+  }).join("");
+  exercisePickerEmptyStateEl.classList.toggle("visible", filtered.length === 0);
+  loadExercisePickerThumbnails();
+}
+
+async function loadExercisePickerThumbnails() {
+  const slots = [...exercisePickerListEl.querySelectorAll(".exercise-thumb[data-path]")];
+  for (const slot of slots) {
+    const url = await getSignedUrl(slot.dataset.path);
+    if (url && slot.isConnected) slot.innerHTML = `<img src="${url}" alt="">`;
+  }
+}
+
+openExercisePickerBtn.addEventListener("click", openExercisePicker);
+exercisePickerClose.addEventListener("click", closeExercisePicker);
+exercisePickerOverlay.addEventListener("click", (e) => {
+  if (e.target === exercisePickerOverlay) closeExercisePicker();
+});
+
+exercisePickerSearchInput.addEventListener("input", () => {
+  exercisePickerSearchTerm = exercisePickerSearchInput.value;
+  renderExercisePicker();
+});
+
+exercisePickerCategoryFiltersEl.addEventListener("click", (e) => {
+  const chip = e.target.closest(".filter-btn");
+  if (!chip) return;
+  exercisePickerCategoryFilter = exercisePickerCategoryFilter === chip.dataset.id ? null : chip.dataset.id;
+  renderExercisePicker();
+});
+
+exercisePickerListEl.addEventListener("click", (e) => {
+  const li = e.target.closest(".exercise-item");
+  if (!li) return;
+  const ex = exerciseById(li.dataset.id);
+  if (!ex) return;
+  exercisePickerSelectedExerciseId = ex.id;
+  exercisePickerRepsNameEl.textContent = ex.name;
+  exercisePickerRepsInput.value = "";
+  exercisePickerStepList.hidden = true;
+  exercisePickerStepReps.hidden = false;
+  exercisePickerRepsInput.focus();
+});
+
+exercisePickerBackBtn.addEventListener("click", () => {
+  exercisePickerSelectedExerciseId = null;
+  exercisePickerStepReps.hidden = true;
+  exercisePickerStepList.hidden = false;
+});
+
+exercisePickerAddBtn.addEventListener("click", async () => {
+  if (!activeRoutineId || !exercisePickerSelectedExerciseId) return;
+  const reps = parseIntOrNull(exercisePickerRepsInput.value);
   const existing = routineExercisesFor(activeRoutineId);
   const position = existing.length ? Math.max(...existing.map(re => re.position)) + 1 : 0;
   const { error } = await sb.from("routine_exercises").insert({
-    routine_id: activeRoutineId, exercise_id: exerciseId, reps, position, user_id: session.user.id,
+    routine_id: activeRoutineId, exercise_id: exercisePickerSelectedExerciseId, reps, position, user_id: session.user.id,
   });
-  addRoutineExerciseReps.value = "";
   if (error) return;
   await loadRoutineExercises();
+  closeExercisePicker();
   renderAll();
 });
 
@@ -1713,9 +1825,6 @@ function renderRoutineModal() {
       <button type="button" class="remove" data-id="${re.id}" aria-label="Verwijderen">×</button>
     </li>`;
   }).join("");
-
-  const activeExercises = exercises.filter(e => !e.archived);
-  addRoutineExerciseSelect.innerHTML = activeExercises.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("");
 }
 
 function shortenUserAgent(ua) {

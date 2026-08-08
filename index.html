@@ -306,16 +306,36 @@
     <section class="modal-section">
       <h3>Oefeningen in deze routine</h3>
       <ul class="routine-exercise-list" id="routineExerciseList"></ul>
-      <form id="addRoutineExerciseForm" class="add-form">
-        <select id="addRoutineExerciseSelect" aria-label="Oefening"></select>
-        <input id="addRoutineExerciseReps" type="number" min="0" step="1" placeholder="Reps" style="max-width: 90px;">
-        <button type="submit" aria-label="Oefening toevoegen">+</button>
-      </form>
+      <button type="button" id="openExercisePickerBtn" class="add-exercise-btn">+ Oefening toevoegen</button>
     </section>
 
     <div class="modal-actions">
       <button type="button" id="routineModalArchiveBtn" class="modal-secondary-btn"></button>
       <button type="button" id="routineModalDeleteBtn" class="modal-danger-btn">Verwijderen</button>
+    </div>
+  </div>
+</div>
+
+<div id="exercisePickerOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="exercisePickerModal">
+    <button class="modal-close" id="exercisePickerClose" aria-label="Sluiten">×</button>
+
+    <div id="exercisePickerStepList">
+      <h2 class="modal-title">Oefening toevoegen</h2>
+      <input id="exercisePickerSearch" type="search" class="exercise-picker-search" placeholder="Zoek op naam of omschrijving..." autocomplete="off">
+      <nav class="filters tag-filters" id="exercisePickerCategoryFilters"></nav>
+      <ul class="exercise-list" id="exercisePickerList"></ul>
+      <p class="empty-state" id="exercisePickerEmptyState">Geen oefeningen gevonden.</p>
+    </div>
+
+    <div id="exercisePickerStepReps" hidden>
+      <button type="button" class="modal-secondary-btn exercise-picker-back-btn" id="exercisePickerBackBtn">‹ Terug</button>
+      <h2 class="modal-title" id="exercisePickerRepsName"></h2>
+      <label class="settings-row">
+        <span>Reps</span>
+        <input id="exercisePickerRepsInput" type="number" min="0" step="1" inputmode="numeric">
+      </label>
+      <button type="button" class="workout-next-btn" id="exercisePickerAddBtn">Toevoegen aan routine</button>
     </div>
   </div>
 </div>

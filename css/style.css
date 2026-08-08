@@ -716,6 +716,56 @@ body {
 }
 
 /* ---------- routine-exercise list (inside routine modal) ---------- */
+.add-exercise-btn {
+  display: block;
+  width: 100%;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.add-exercise-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.exercise-picker-search {
+  display: block;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  outline: none;
+  margin-bottom: 12px;
+}
+
+.exercise-picker-search:focus {
+  border-color: var(--accent);
+}
+
+.exercise-item.already-added {
+  opacity: 0.5;
+}
+
+.exercise-item .already-added-badge {
+  flex-shrink: 0;
+  color: var(--success);
+  font-size: 18px;
+}
+
+.exercise-picker-back-btn {
+  margin-bottom: 16px;
+}
+
 .routine-exercise-list {
   list-style: none;
   margin: 0 0 10px;
