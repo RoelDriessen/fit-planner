@@ -32,6 +32,10 @@ let weekOffset = 0; // weeks relative to the current week
 let activeExerciseCategoryFilter = null;
 let activeExerciseId = null;
 let activeRoutineId = null;
+let workoutSession = null; // the sessions row a workout-in-progress will mark done
+let workoutSequence = []; // flattened [{exerciseId, reps, round, totalRounds}, ...]
+let workoutStepIndex = 0;
+const signedUrlCache = new Map(); // storage_path -> { url, expiresAt } — shared by thumbnails, modal attachments, and the workout player
 
 // ---------- elements ----------
 const authScreen = document.getElementById("authScreen");
@@ -139,6 +143,19 @@ const addRoutineExerciseSelect = document.getElementById("addRoutineExerciseSele
 const addRoutineExerciseReps = document.getElementById("addRoutineExerciseReps");
 const routineModalArchiveBtn = document.getElementById("routineModalArchiveBtn");
 const routineModalDeleteBtn = document.getElementById("routineModalDeleteBtn");
+const routineModalStartBtn = document.getElementById("routineModalStartBtn");
+
+const workoutOverlay = document.getElementById("workoutOverlay");
+const workoutCloseBtn = document.getElementById("workoutCloseBtn");
+const workoutRoutineName = document.getElementById("workoutRoutineName");
+const workoutProgressText = document.getElementById("workoutProgressText");
+const workoutProgressFill = document.getElementById("workoutProgressFill");
+const workoutMedia = document.getElementById("workoutMedia");
+const workoutExerciseName = document.getElementById("workoutExerciseName");
+const workoutReps = document.getElementById("workoutReps");
+const workoutNotes = document.getElementById("workoutNotes");
+const workoutBackBtn = document.getElementById("workoutBackBtn");
+const workoutNextBtn = document.getElementById("workoutNextBtn");
 
 const lightboxOverlay = document.getElementById("lightboxOverlay");
 const lightboxClose = document.getElementById("lightboxClose");
@@ -568,6 +585,24 @@ function routineExercisesFor(routineId) {
   return routineExercises.filter(re => re.routine_id === routineId).sort((a, b) => a.position - b.position);
 }
 
+function firstImageAttachmentFor(exerciseId) {
+  // exerciseAttachments is loaded ordered oldest-first, so this is simply the
+  // first photo ever attached — same idiom as the sibling app's cover image.
+  return exerciseAttachments.find(a => a.exercise_id === exerciseId) || null;
+}
+
+// Signed URLs last 3600s server-side; cached client-side for a bit less than
+// that so a re-render doesn't re-request the same URL. Shared by exercise-list
+// thumbnails, the exercise modal's attachment grid, and the workout player.
+async function getSignedUrl(storagePath) {
+  const cached = signedUrlCache.get(storagePath);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  const { data } = await sb.storage.from("exercise-attachments").createSignedUrl(storagePath, 3600);
+  if (!data) return null;
+  signedUrlCache.set(storagePath, { url: data.signedUrl, expiresAt: Date.now() + 3000 * 1000 });
+  return data.signedUrl;
+}
+
 function isExerciseEditable(ex) {
   // No creator on record (e.g. pre-multi-user data) defaults to editable by anyone.
   return !ex.created_by_app_user_id || ex.created_by_app_user_id === currentAppUserId;
@@ -922,9 +957,19 @@ routineModalDeleteBtn.addEventListener("click", () => {
 });
 
 routineList.addEventListener("click", (e) => {
+  const startBtn = e.target.closest(".routine-start-btn");
+  if (startBtn) {
+    e.stopPropagation();
+    startRoutineWorkout(startBtn.dataset.id);
+    return;
+  }
   const li = e.target.closest(".exercise-item");
   if (!li) return;
   openRoutineModal(li.dataset.id);
+});
+
+routineModalStartBtn.addEventListener("click", () => {
+  if (activeRoutineId) startRoutineWorkout(activeRoutineId);
 });
 
 // ---------- routine-exercises (oefeningen binnen een routine) ----------
@@ -986,6 +1031,120 @@ routineExerciseList.addEventListener("change", (e) => {
   if (!input) return;
   updateRoutineExerciseReps(input.dataset.id, parseIntOrNull(input.value));
 });
+
+// ---------- workout player ("Starten") ----------
+// Flattens a routine's exercises into one linear sequence, repeated once per
+// set — e.g. sets=3 with exercises [A, B] becomes [A, B, A, B, A, B] — so
+// "afvinken" (the Klaar button) just walks forward through one flat list
+// instead of needing nested round/exercise counters in the render code.
+function buildWorkoutSequence(routine, items) {
+  const sets = Math.max(1, routine.sets || 1);
+  const sequence = [];
+  for (let round = 1; round <= sets; round++) {
+    for (const re of items) {
+      sequence.push({ exerciseId: re.exercise_id, reps: re.reps, round, totalRounds: sets });
+    }
+  }
+  return sequence;
+}
+
+async function startRoutineWorkout(routineId) {
+  const routine = routineById(routineId);
+  if (!routine) return;
+  const items = routineExercisesFor(routineId);
+  if (!items.length) return;
+
+  // Reuse today's already-planned session for this routine if one exists,
+  // so a workout started from a day you'd already scheduled doesn't create
+  // a duplicate — otherwise create one on the fly, same as planning it
+  // yourself would, just started immediately instead of for later.
+  const todayStr = toDateStr(new Date());
+  let s = sessions.find(x => x.routine_id === routineId && x.scheduled_date === todayStr && x.status === "planned");
+  if (!s) {
+    const { data, error } = await sb.from("sessions").insert({
+      user_id: session.user.id,
+      app_user_id: currentAppUserId,
+      routine_id: routineId,
+      scheduled_date: todayStr,
+      status: "planned",
+    }).select().maybeSingle();
+    if (error || !data) return;
+    await loadSessions();
+    s = sessions.find(x => x.id === data.id) || data;
+  }
+
+  workoutSession = s;
+  workoutSequence = buildWorkoutSequence(routine, items);
+  workoutStepIndex = 0;
+  workoutOverlay.hidden = false;
+  renderWorkoutStep();
+}
+
+function closeWorkout() {
+  workoutOverlay.hidden = true;
+  workoutSession = null;
+  workoutSequence = [];
+  workoutStepIndex = 0;
+}
+
+async function finishWorkout() {
+  const sessionId = workoutSession.id;
+  closeWorkout();
+  await setSessionStatus(sessionId, "done");
+}
+
+function workoutNext() {
+  workoutStepIndex++;
+  if (workoutStepIndex >= workoutSequence.length) finishWorkout();
+  else renderWorkoutStep();
+}
+
+function workoutBack() {
+  if (workoutStepIndex === 0) return;
+  workoutStepIndex--;
+  renderWorkoutStep();
+}
+
+function renderWorkoutStep() {
+  const step = workoutSequence[workoutStepIndex];
+  if (!step) return;
+  const ex = exerciseById(step.exerciseId);
+  const routine = workoutSession ? routineById(workoutSession.routine_id) : null;
+
+  workoutRoutineName.textContent = routine ? routine.name : "";
+  workoutProgressText.textContent = `Oefening ${workoutStepIndex + 1} van ${workoutSequence.length}`
+    + (step.totalRounds > 1 ? ` · Set ${step.round}/${step.totalRounds}` : "");
+  workoutProgressFill.style.width = `${Math.round((workoutStepIndex / workoutSequence.length) * 100)}%`;
+
+  workoutExerciseName.textContent = ex ? ex.name : "Verwijderde oefening";
+  workoutReps.hidden = !step.reps;
+  workoutReps.textContent = step.reps ? `${step.reps} reps` : "";
+  workoutNotes.hidden = !ex?.notes;
+  workoutNotes.textContent = ex?.notes || "";
+
+  workoutMedia.innerHTML = "";
+  if (ex?.video_url) {
+    workoutMedia.innerHTML = videoEmbedHtml(ex.video_url);
+  } else if (ex) {
+    const att = firstImageAttachmentFor(ex.id);
+    if (att) {
+      getSignedUrl(att.storage_path).then(url => {
+        // Guard against a stale async response landing after the user already
+        // moved to a different step (or closed the player) while it was loading.
+        if (url && workoutSequence[workoutStepIndex] === step && !workoutOverlay.hidden) {
+          workoutMedia.innerHTML = `<img src="${url}" alt="">`;
+        }
+      });
+    }
+  }
+
+  workoutNextBtn.textContent = workoutStepIndex === workoutSequence.length - 1 ? "Klaar — voltooien" : "Klaar, volgende";
+  workoutBackBtn.disabled = workoutStepIndex === 0;
+}
+
+workoutCloseBtn.addEventListener("click", closeWorkout);
+workoutNextBtn.addEventListener("click", workoutNext);
+workoutBackBtn.addEventListener("click", workoutBack);
 
 // ---------- sessions ----------
 async function setSessionStatus(id, status) {
@@ -1247,6 +1406,10 @@ function renderAll() {
     if (routines.some(r => r.id === activeRoutineId)) renderRoutineModal();
     else closeRoutineModal();
   }
+  if (workoutSession && !routines.some(r => r.id === workoutSession.routine_id)) {
+    // Routine was deleted (e.g. from another device) mid-workout.
+    closeWorkout();
+  }
 }
 
 function renderToday() {
@@ -1347,11 +1510,13 @@ function renderExercises() {
   exerciseList.innerHTML = sorted.map(e => {
     const cat = categoryById(e.category_id);
     const creator = appUserById(e.created_by_app_user_id);
+    const thumb = firstImageAttachmentFor(e.id);
     const badges = [];
     if (cat) badges.push(`<span class="meta-badge cat" style="--cat-color:${cat.color}">${escapeHtml(cat.name)}</span>`);
     if (creator) badges.push(`<span class="meta-badge">${escapeHtml(creator.name)}</span>`);
     if (e.archived) badges.push(`<span class="meta-badge">Gearchiveerd</span>`);
     return `<li class="exercise-item${e.archived ? " archived" : ""}" data-id="${e.id}">
+      ${thumb ? `<div class="exercise-thumb" data-path="${escapeHtml(thumb.storage_path)}"></div>` : ""}
       <div class="exercise-main">
         <span class="exercise-name">${escapeHtml(e.name)}</span>
         <div class="session-meta">${badges.join("")}</div>
@@ -1359,6 +1524,16 @@ function renderExercises() {
     </li>`;
   }).join("");
   exerciseEmptyState.classList.toggle("visible", sorted.length === 0);
+  loadExerciseThumbnails();
+}
+
+async function loadExerciseThumbnails() {
+  const slots = [...exerciseList.querySelectorAll(".exercise-thumb[data-path]")];
+  for (const slot of slots) {
+    const path = slot.dataset.path;
+    const url = await getSignedUrl(path);
+    if (url && slot.isConnected) slot.innerHTML = `<img src="${url}" alt="">`;
+  }
 }
 
 function renderExerciseModal() {
@@ -1401,8 +1576,7 @@ async function renderExerciseModalAttachments(exerciseId) {
     const card = document.createElement("div");
     card.className = "attachment-card";
 
-    const { data } = await sb.storage.from("exercise-attachments").createSignedUrl(a.storage_path, 3600);
-    const url = data ? data.signedUrl : null;
+    const url = await getSignedUrl(a.storage_path);
     if (url) {
       const img = document.createElement("img");
       img.src = url;
@@ -1445,6 +1619,7 @@ function renderRoutines() {
         <span class="exercise-name">${escapeHtml(r.name)}</span>
         <div class="session-meta">${badges.join("")}</div>
       </div>
+      ${!r.archived && count > 0 ? `<button type="button" class="routine-start-btn" data-id="${r.id}">▶ Starten</button>` : ""}
     </li>`;
   }).join("");
   routineEmptyState.classList.toggle("visible", sorted.length === 0);
@@ -1473,6 +1648,8 @@ function renderRoutineModal() {
 
   const activeExercises = exercises.filter(e => !e.archived);
   addRoutineExerciseSelect.innerHTML = activeExercises.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("");
+
+  routineModalStartBtn.hidden = items.length === 0;
 }
 
 function shortenUserAgent(ua) {

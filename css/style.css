@@ -932,6 +932,22 @@ body {
   background: var(--surface-hover);
 }
 
+.exercise-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+.exercise-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .exercise-item.archived {
   opacity: 0.6;
 }
@@ -1271,6 +1287,33 @@ textarea:disabled {
   cursor: pointer;
 }
 
+.workout-start-btn {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 20px;
+}
+
+.routine-start-btn {
+  flex-shrink: 0;
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 @media (min-width: 600px) {
   .modal-overlay {
     align-items: center;
@@ -1385,4 +1428,193 @@ textarea:disabled {
 
 @media (max-width: 400px) {
   .header h1 { font-size: 24px; }
+}
+
+/* ---------- workout player (routine "Starten" mode) ---------- */
+.workout-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 300;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.workout-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.workout-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.workout-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.workout-progress-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.workout-routine-name {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.workout-progress-text {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.workout-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.workout-media:empty {
+  display: none;
+}
+
+.workout-media .video-embed {
+  border-radius: var(--radius);
+}
+
+.workout-media img {
+  width: 100%;
+  max-height: 40vh;
+  object-fit: cover;
+  border-radius: var(--radius);
+  display: block;
+}
+
+.workout-info {
+  text-align: center;
+}
+
+.workout-exercise-name {
+  font-size: 26px;
+  margin: 0 0 10px;
+}
+
+.workout-reps {
+  display: inline-block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.workout-notes {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin: 0;
+}
+
+.workout-actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.workout-back-btn {
+  flex: 0 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.workout-back-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.workout-next-btn {
+  flex: 1;
+  background: var(--accent);
+  border: none;
+  color: white;
+  padding: 16px;
+  border-radius: var(--radius);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Phone in landscape: short viewport, plenty of width — go side-by-side
+   instead of squeezing a portrait layout sideways. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .workout-panel {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: space-between;
+    padding: 10px 20px;
+  }
+
+  .workout-top {
+    flex: 0 0 100%;
+  }
+
+  .workout-content {
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .workout-media {
+    flex: 1 1 45%;
+    min-width: 0;
+  }
+
+  .workout-media img {
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .workout-info {
+    flex: 1 1 55%;
+    min-width: 0;
+    text-align: left;
+    overflow-y: auto;
+    max-height: 100%;
+  }
+
+  .workout-exercise-name {
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+
+  .workout-actions {
+    flex: 0 0 100%;
+  }
 }

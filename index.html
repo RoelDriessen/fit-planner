@@ -302,9 +302,38 @@
       </form>
     </section>
 
+    <button type="button" id="routineModalStartBtn" class="workout-start-btn">▶ Starten</button>
+
     <div class="modal-actions">
       <button type="button" id="routineModalArchiveBtn" class="modal-secondary-btn"></button>
       <button type="button" id="routineModalDeleteBtn" class="modal-danger-btn">Verwijderen</button>
+    </div>
+  </div>
+</div>
+
+<div id="workoutOverlay" class="workout-overlay" hidden>
+  <div class="workout-panel">
+    <div class="workout-top">
+      <button type="button" class="workout-close" id="workoutCloseBtn" aria-label="Sluiten">×</button>
+      <div class="workout-progress-wrap">
+        <span class="workout-routine-name" id="workoutRoutineName"></span>
+        <span class="workout-progress-text" id="workoutProgressText"></span>
+        <div class="progress-bar"><div class="progress-fill" id="workoutProgressFill"></div></div>
+      </div>
+    </div>
+
+    <div class="workout-content">
+      <div class="workout-media" id="workoutMedia"></div>
+      <div class="workout-info">
+        <h2 class="workout-exercise-name" id="workoutExerciseName"></h2>
+        <span class="workout-reps" id="workoutReps" hidden></span>
+        <p class="workout-notes" id="workoutNotes" hidden></p>
+      </div>
+    </div>
+
+    <div class="workout-actions">
+      <button type="button" class="workout-back-btn" id="workoutBackBtn">‹ Vorige</button>
+      <button type="button" class="workout-next-btn" id="workoutNextBtn">Klaar, volgende</button>
     </div>
   </div>
 </div>
