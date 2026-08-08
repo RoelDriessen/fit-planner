@@ -600,10 +600,47 @@ body {
   color: var(--text-dim);
 }
 
+.day-session-item.skipped .name {
+  color: var(--text-dim);
+}
+
 .day-session-item .time {
   color: var(--text-dim);
   font-size: 11px;
   flex-shrink: 0;
+}
+
+.day-session-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.day-session-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.day-session-action-btn.done-btn.active {
+  background: var(--success);
+  border-color: var(--success);
+  color: white;
+}
+
+.day-session-action-btn.skip-btn.active {
+  background: var(--text-dim);
+  border-color: var(--text-dim);
+  color: var(--bg);
 }
 
 .day-session-item .remove {

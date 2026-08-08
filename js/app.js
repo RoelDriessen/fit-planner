@@ -1088,7 +1088,10 @@ weekDays.addEventListener("click", (e) => {
     return;
   }
   const item = e.target.closest(".day-session-item");
-  if (item) toggleSessionStatus(item.dataset.id, "done");
+  if (!item) return;
+  const id = item.dataset.id;
+  if (e.target.closest(".done-btn")) toggleSessionStatus(id, "done");
+  else if (e.target.closest(".skip-btn")) toggleSessionStatus(id, "skipped");
 });
 
 weekPrevBtn.addEventListener("click", () => { weekOffset -= 1; renderWeek(); });
@@ -1301,10 +1304,14 @@ function renderWeek() {
 
     const itemsHtml = daySessions.map(s => {
       const r = routineById(s.routine_id);
-      return `<li class="day-session-item${s.status === "done" ? " done" : ""}" data-id="${s.id}">
+      return `<li class="day-session-item ${s.status}" data-id="${s.id}">
         <span class="dot"></span>
         <span class="name">${escapeHtml(r ? r.name : "Verwijderde routine")}</span>
         ${s.scheduled_time ? `<span class="time">${formatTime(s.scheduled_time)}</span>` : ""}
+        <div class="day-session-actions">
+          <button type="button" class="day-session-action-btn done-btn${s.status === "done" ? " active" : ""}" aria-label="Klaar">✓</button>
+          <button type="button" class="day-session-action-btn skip-btn${s.status === "skipped" ? " active" : ""}" aria-label="Overslaan">✕</button>
+        </div>
         <button type="button" class="remove" data-id="${s.id}" aria-label="Verwijderen">×</button>
       </li>`;
     }).join("");
