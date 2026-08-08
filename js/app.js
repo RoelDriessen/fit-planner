@@ -13,19 +13,26 @@ const MONTH_NAMES = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "se
 const ALLOWED_MIME = ["image/png", "image/jpeg"];
 const ALLOWED_EXT = ["png", "jpg", "jpeg"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const APP_USER_STORAGE_KEY = "fitPlanner.appUserId";
 
 let session = null;
 let exerciseCategories = [];
 let exercises = [];
+let routines = [];
+let routineExercises = [];
 let sessions = [];
 let userSettings = null;
 let pushSubscriptions = [];
 let exerciseAttachments = [];
+let appUsers = [];
+let currentAppUserId = null;
+let pendingProfileId = null; // profile tile awaiting code confirmation, transient UI state
 let channel = null;
-let view = "today"; // "today" | "week" | "exercises" | "settings"
+let view = "today"; // "today" | "week" | "routines" | "exercises" | "settings"
 let weekOffset = 0; // weeks relative to the current week
 let activeExerciseCategoryFilter = null;
 let activeExerciseId = null;
+let activeRoutineId = null;
 
 // ---------- elements ----------
 const authScreen = document.getElementById("authScreen");
@@ -34,6 +41,21 @@ const authForm = document.getElementById("authForm");
 const authPassword = document.getElementById("authPassword");
 const authSubmit = document.getElementById("authSubmit");
 const authMessage = document.getElementById("authMessage");
+
+const profileScreen = document.getElementById("profileScreen");
+const profileTiles = document.getElementById("profileTiles");
+const profileCodePrompt = document.getElementById("profileCodePrompt");
+const profileCodePromptName = document.getElementById("profileCodePromptName");
+const profileCodeForm = document.getElementById("profileCodeForm");
+const profileCodeInput = document.getElementById("profileCodeInput");
+const profileCodeCancelBtn = document.getElementById("profileCodeCancelBtn");
+const newProfileBtn = document.getElementById("newProfileBtn");
+const newProfileForm = document.getElementById("newProfileForm");
+const newProfileName = document.getElementById("newProfileName");
+const newProfileCode = document.getElementById("newProfileCode");
+const newProfileCodeConfirm = document.getElementById("newProfileCodeConfirm");
+const newProfileCancelBtn = document.getElementById("newProfileCancelBtn");
+const profileMessage = document.getElementById("profileMessage");
 
 const appEl = document.getElementById("app");
 const userEmailEl = document.getElementById("userEmail");
@@ -57,6 +79,12 @@ const weekTodayBtn = document.getElementById("weekTodayBtn");
 const copyPrevWeekBtn = document.getElementById("copyPrevWeekBtn");
 const weekDays = document.getElementById("weekDays");
 
+const routinesView = document.getElementById("routinesView");
+const addRoutineForm = document.getElementById("addRoutineForm");
+const addRoutineInput = document.getElementById("addRoutineInput");
+const routineList = document.getElementById("routineList");
+const routineEmptyState = document.getElementById("routineEmptyState");
+
 const exercisesView = document.getElementById("exercisesView");
 const exerciseCategoryFilters = document.getElementById("exerciseCategoryFilters");
 const addExerciseCategoryForm = document.getElementById("addExerciseCategoryForm");
@@ -68,6 +96,8 @@ const exerciseList = document.getElementById("exerciseList");
 const exerciseEmptyState = document.getElementById("exerciseEmptyState");
 
 const settingsView = document.getElementById("settingsView");
+const currentProfileHint = document.getElementById("currentProfileHint");
+const switchProfileBtn = document.getElementById("switchProfileBtn");
 const settingsForm = document.getElementById("settingsForm");
 const settingsTimezone = document.getElementById("settingsTimezone");
 const settingsDailyEnabled = document.getElementById("settingsDailyEnabled");
@@ -79,15 +109,16 @@ const settingsMessage = document.getElementById("settingsMessage");
 const pushHint = document.getElementById("pushHint");
 const enablePushBtn = document.getElementById("enablePushBtn");
 const deviceList = document.getElementById("deviceList");
+const testDailyReminderBtn = document.getElementById("testDailyReminderBtn");
+const testWeeklyReminderBtn = document.getElementById("testWeeklyReminderBtn");
+const testReminderMessage = document.getElementById("testReminderMessage");
 
 const exerciseModalOverlay = document.getElementById("exerciseModalOverlay");
 const exerciseModalClose = document.getElementById("exerciseModalClose");
 const exerciseModalName = document.getElementById("exerciseModalName");
+const exerciseModalOwnerBadge = document.getElementById("exerciseModalOwnerBadge");
 const exerciseModalCategory = document.getElementById("exerciseModalCategory");
-const exerciseModalSets = document.getElementById("exerciseModalSets");
-const exerciseModalReps = document.getElementById("exerciseModalReps");
 const exerciseModalDuration = document.getElementById("exerciseModalDuration");
-const exerciseModalPoints = document.getElementById("exerciseModalPoints");
 const exerciseModalNotes = document.getElementById("exerciseModalNotes");
 const exerciseModalVideoUrl = document.getElementById("exerciseModalVideoUrl");
 const exerciseModalVideoEmbed = document.getElementById("exerciseModalVideoEmbed");
@@ -97,13 +128,26 @@ const exerciseAttachmentError = document.getElementById("exerciseAttachmentError
 const exerciseModalArchiveBtn = document.getElementById("exerciseModalArchiveBtn");
 const exerciseModalDeleteBtn = document.getElementById("exerciseModalDeleteBtn");
 
+const routineModalOverlay = document.getElementById("routineModalOverlay");
+const routineModalClose = document.getElementById("routineModalClose");
+const routineModalName = document.getElementById("routineModalName");
+const routineModalSets = document.getElementById("routineModalSets");
+const routineModalPoints = document.getElementById("routineModalPoints");
+const routineModalNotes = document.getElementById("routineModalNotes");
+const routineExerciseList = document.getElementById("routineExerciseList");
+const addRoutineExerciseForm = document.getElementById("addRoutineExerciseForm");
+const addRoutineExerciseSelect = document.getElementById("addRoutineExerciseSelect");
+const addRoutineExerciseReps = document.getElementById("addRoutineExerciseReps");
+const routineModalArchiveBtn = document.getElementById("routineModalArchiveBtn");
+const routineModalDeleteBtn = document.getElementById("routineModalDeleteBtn");
+
 const lightboxOverlay = document.getElementById("lightboxOverlay");
 const lightboxClose = document.getElementById("lightboxClose");
 const lightboxContent = document.getElementById("lightboxContent");
 
 let authMode = "signin";
 
-// ---------- auth ----------
+// ---------- auth (household login — unchanged from before multi-user) ----------
 authTabs.addEventListener("click", (e) => {
   const btn = e.target.closest(".auth-tab");
   if (!btn) return;
@@ -162,24 +206,167 @@ if (sb) {
 
 function showAuth() {
   teardownRealtime();
+  currentAppUserId = null;
   authScreen.hidden = false;
+  profileScreen.hidden = true;
   appEl.hidden = true;
 }
 
+// Household login succeeded. Load the data shared by the whole household
+// (categories/exercises/profiles) and decide whether to jump straight into a
+// remembered profile or show the profile picker.
 async function showApp() {
   authScreen.hidden = true;
+  await Promise.all([loadExerciseCategories(), loadExercises(), loadAppUsers()]);
+  const savedId = localStorage.getItem(APP_USER_STORAGE_KEY);
+  if (savedId && appUsers.some(u => u.id === savedId)) {
+    currentAppUserId = savedId;
+    await enterApp();
+  } else {
+    showProfilePicker();
+  }
+}
+
+// Only once a profile is active do we load that profile's own data and start
+// realtime sync — sessions/routines/etc. are meaningless without a profile.
+async function enterApp() {
+  profileScreen.hidden = true;
   appEl.hidden = false;
-  userEmailEl.textContent = session.user.email;
+  const profile = currentAppUser();
+  userEmailEl.textContent = profile ? profile.name : session.user.email;
   await Promise.all([
-    loadExerciseCategories(), loadExercises(), loadSessions(),
-    loadUserSettings(), loadPushSubscriptions(), loadExerciseAttachments(),
+    loadSessions(), loadUserSettings(), loadPushSubscriptions(), loadExerciseAttachments(),
+    loadRoutines(), loadRoutineExercises(),
   ]);
   setupRealtime();
   renderAll();
   trySilentPushResubscribe();
 }
 
+// ---------- profile picker ----------
+function showProfilePicker() {
+  profileScreen.hidden = false;
+  appEl.hidden = true;
+  profileMessage.textContent = "";
+  if (appUsers.length === 0) {
+    // First-ever use of this household account: skip straight to profile creation.
+    profileTiles.hidden = true;
+    profileCodePrompt.hidden = true;
+    newProfileBtn.hidden = true;
+    newProfileForm.hidden = false;
+    newProfileName.value = "";
+    newProfileCode.value = "";
+    newProfileCodeConfirm.value = "";
+  } else {
+    profileTiles.hidden = false;
+    profileCodePrompt.hidden = true;
+    newProfileForm.hidden = true;
+    newProfileBtn.hidden = false;
+    renderProfileTiles();
+  }
+}
+
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function renderProfileTiles() {
+  profileTiles.innerHTML = appUsers.map(u =>
+    `<button type="button" class="profile-tile" data-id="${u.id}">${escapeHtml(u.name)}</button>`
+  ).join("");
+}
+
+profileTiles.addEventListener("click", (e) => {
+  const tile = e.target.closest(".profile-tile");
+  if (!tile) return;
+  pendingProfileId = tile.dataset.id;
+  const u = appUserById(pendingProfileId);
+  profileCodePromptName.textContent = u ? u.name : "";
+  profileCodeInput.value = "";
+  profileMessage.textContent = "";
+  profileTiles.hidden = true;
+  newProfileBtn.hidden = true;
+  profileCodePrompt.hidden = false;
+  profileCodeInput.focus();
+});
+
+profileCodeCancelBtn.addEventListener("click", () => {
+  pendingProfileId = null;
+  profileCodePrompt.hidden = true;
+  profileTiles.hidden = false;
+  newProfileBtn.hidden = false;
+});
+
+profileCodeForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const u = appUserById(pendingProfileId);
+  if (!u) return;
+  const hash = await sha256Hex(profileCodeInput.value + ":" + u.id);
+  if (hash !== u.code_hash) {
+    profileMessage.textContent = "Onjuiste code.";
+    return;
+  }
+  currentAppUserId = u.id;
+  localStorage.setItem(APP_USER_STORAGE_KEY, u.id);
+  await enterApp();
+});
+
+newProfileBtn.addEventListener("click", () => {
+  profileTiles.hidden = true;
+  newProfileBtn.hidden = true;
+  newProfileForm.hidden = false;
+  newProfileName.value = "";
+  newProfileCode.value = "";
+  newProfileCodeConfirm.value = "";
+  profileMessage.textContent = "";
+  newProfileName.focus();
+});
+
+newProfileCancelBtn.addEventListener("click", () => {
+  newProfileForm.hidden = true;
+  profileTiles.hidden = false;
+  newProfileBtn.hidden = false;
+});
+
+newProfileForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = newProfileName.value.trim();
+  const code = newProfileCode.value;
+  const confirmCode = newProfileCodeConfirm.value;
+  if (!name) return;
+  if (code !== confirmCode) {
+    profileMessage.textContent = "Codes komen niet overeen.";
+    return;
+  }
+  // id generated client-side so it can be folded into the hash as a salt —
+  // prevents a free rainbow-table attack against code_hash by anyone who can
+  // read the app_users table (which, by this app's design, is every household
+  // member — see CLAUDE.md's multi-user model section).
+  const id = crypto.randomUUID();
+  const code_hash = await sha256Hex(code + ":" + id);
+  const { error } = await sb.from("app_users").insert({ id, name, code_hash, user_id: session.user.id });
+  if (error) {
+    profileMessage.textContent = error.message;
+    return;
+  }
+  await loadAppUsers();
+  currentAppUserId = id;
+  localStorage.setItem(APP_USER_STORAGE_KEY, id);
+  await enterApp();
+});
+
+switchProfileBtn.addEventListener("click", () => {
+  localStorage.removeItem(APP_USER_STORAGE_KEY);
+  currentAppUserId = null;
+  teardownRealtime();
+  appEl.hidden = true;
+  showProfilePicker();
+});
+
 // ---------- data loading ----------
+// exercise_categories/exercises/app_users are shared across the whole household
+// (scoped only by the baseline user_id = auth.uid(), same for every profile).
 async function loadExerciseCategories() {
   const { data, error } = await sb.from("exercise_categories").select("*").order("created_at", { ascending: true });
   if (!error) exerciseCategories = data;
@@ -190,17 +377,39 @@ async function loadExercises() {
   if (!error) exercises = data;
 }
 
+async function loadAppUsers() {
+  const { data, error } = await sb.from("app_users").select("*").order("created_at", { ascending: true });
+  if (!error) appUsers = data;
+}
+
+// The tables below all carry a real app_user_id column, so filtering at the
+// query itself means every render function downstream can keep using
+// `sessions`/`routines`/`pushSubscriptions` directly without re-filtering —
+// they're scoped to the active profile by construction, not by convention.
+async function loadRoutines() {
+  const { data, error } = await sb.from("routines").select("*").eq("app_user_id", currentAppUserId).order("created_at", { ascending: true });
+  if (!error) routines = data;
+}
+
+async function loadRoutineExercises() {
+  // Not filtered by app_user_id (that column doesn't exist here on purpose —
+  // see supabase-schema.sql) but only ever read through routineExercisesFor(),
+  // which is only ever called with one of the current profile's own routine ids.
+  const { data, error } = await sb.from("routine_exercises").select("*").order("position", { ascending: true });
+  if (!error) routineExercises = data;
+}
+
 async function loadSessions() {
-  const { data, error } = await sb.from("sessions").select("*").order("scheduled_date", { ascending: true });
+  const { data, error } = await sb.from("sessions").select("*").eq("app_user_id", currentAppUserId).order("scheduled_date", { ascending: true });
   if (!error) sessions = data;
 }
 
 async function loadUserSettings() {
-  let { data } = await sb.from("user_settings").select("*").eq("user_id", session.user.id).maybeSingle();
+  let { data } = await sb.from("user_settings").select("*").eq("app_user_id", currentAppUserId).maybeSingle();
   if (!data) {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Amsterdam";
     const { data: created } = await sb.from("user_settings")
-      .insert({ user_id: session.user.id, timezone })
+      .insert({ app_user_id: currentAppUserId, user_id: session.user.id, timezone })
       .select()
       .maybeSingle();
     data = created;
@@ -209,7 +418,7 @@ async function loadUserSettings() {
 }
 
 async function loadPushSubscriptions() {
-  const { data, error } = await sb.from("push_subscriptions").select("*").order("created_at", { ascending: true });
+  const { data, error } = await sb.from("push_subscriptions").select("*").eq("app_user_id", currentAppUserId).order("created_at", { ascending: true });
   if (!error) pushSubscriptions = data;
 }
 
@@ -220,6 +429,10 @@ async function loadExerciseAttachments() {
 
 function setupRealtime() {
   teardownRealtime();
+  // Can't scope this any tighter than the shared household user_id — every
+  // profile shares the same auth.uid(), so this fires for every profile's
+  // changes. That's fine: each handler just refetches through the per-profile
+  // filtered loaders above, which do the real scoping.
   const uidFilter = `user_id=eq.${session.user.id}`;
   channel = sb
     .channel("fit-planner-sync")
@@ -227,6 +440,24 @@ function setupRealtime() {
       async () => { await loadExerciseCategories(); renderAll(); })
     .on("postgres_changes", { event: "*", schema: "public", table: "exercises", filter: uidFilter },
       async () => { await loadExercises(); renderAll(); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "app_users", filter: uidFilter },
+      async () => {
+        await loadAppUsers();
+        if (currentAppUserId && !appUsers.some(u => u.id === currentAppUserId)) {
+          // Our profile was deleted from another device — bail out to the picker.
+          localStorage.removeItem(APP_USER_STORAGE_KEY);
+          currentAppUserId = null;
+          teardownRealtime();
+          appEl.hidden = true;
+          showProfilePicker();
+          return;
+        }
+        renderAll();
+      })
+    .on("postgres_changes", { event: "*", schema: "public", table: "routines", filter: uidFilter },
+      async () => { await loadRoutines(); renderAll(); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "routine_exercises", filter: uidFilter },
+      async () => { await loadRoutineExercises(); renderAll(); })
     .on("postgres_changes", { event: "*", schema: "public", table: "sessions", filter: uidFilter },
       async () => { await loadSessions(); renderAll(); })
     .on("postgres_changes", { event: "*", schema: "public", table: "user_settings", filter: uidFilter },
@@ -329,6 +560,27 @@ function exerciseById(id) {
   return exercises.find(e => e.id === id) || null;
 }
 
+function appUserById(id) {
+  return appUsers.find(u => u.id === id) || null;
+}
+
+function currentAppUser() {
+  return appUserById(currentAppUserId);
+}
+
+function routineById(id) {
+  return routines.find(r => r.id === id) || null;
+}
+
+function routineExercisesFor(routineId) {
+  return routineExercises.filter(re => re.routine_id === routineId).sort((a, b) => a.position - b.position);
+}
+
+function isExerciseEditable(ex) {
+  // No creator on record (e.g. pre-multi-user data) defaults to editable by anyone.
+  return !ex.created_by_app_user_id || ex.created_by_app_user_id === currentAppUserId;
+}
+
 // ---------- exercise categories ----------
 addExerciseCategoryForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -357,26 +609,32 @@ function populateCategorySelect(selectEl, selectedId) {
   selectEl.value = selectedId || "";
 }
 
-// ---------- exercises ----------
+// ---------- exercises (shared library; editable only by their creator) ----------
 addExerciseForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = addExerciseInput.value.trim();
   if (!name) return;
   const category_id = addExerciseCategorySelect.value || null;
   addExerciseInput.value = "";
-  const { error } = await sb.from("exercises").insert({ name, category_id, user_id: session.user.id });
+  const { error } = await sb.from("exercises").insert({
+    name, category_id, user_id: session.user.id, created_by_app_user_id: currentAppUserId,
+  });
   if (error) return;
   await loadExercises();
   renderAll();
 });
 
 async function updateExercise(id, patch) {
+  const ex = exerciseById(id);
+  if (ex && !isExerciseEditable(ex)) return; // UI-level guard only, see CLAUDE.md
   await sb.from("exercises").update(patch).eq("id", id);
   await loadExercises();
   renderAll();
 }
 
 async function deleteExercise(id) {
+  const ex = exerciseById(id);
+  if (ex && !isExerciseEditable(ex)) return;
   const paths = exerciseAttachments.filter(a => a.exercise_id === id).map(a => a.storage_path);
   if (paths.length) await sb.storage.from("exercise-attachments").remove(paths);
   await sb.from("exercises").delete().eq("id", id);
@@ -401,7 +659,9 @@ exerciseModalOverlay.addEventListener("click", (e) => {
   if (e.target === exerciseModalOverlay) closeExerciseModal();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !exerciseModalOverlay.hidden) closeExerciseModal();
+  if (e.key !== "Escape") return;
+  if (!exerciseModalOverlay.hidden) closeExerciseModal();
+  else if (!routineModalOverlay.hidden) closeRoutineModal();
 });
 
 exerciseModalName.addEventListener("blur", () => {
@@ -425,22 +685,9 @@ function parseIntOrNull(value) {
   return Number.isNaN(n) ? null : n;
 }
 
-exerciseModalSets.addEventListener("change", () => {
-  if (!activeExerciseId) return;
-  updateExercise(activeExerciseId, { default_sets: parseIntOrNull(exerciseModalSets.value) });
-});
-exerciseModalReps.addEventListener("change", () => {
-  if (!activeExerciseId) return;
-  updateExercise(activeExerciseId, { default_reps: parseIntOrNull(exerciseModalReps.value) });
-});
 exerciseModalDuration.addEventListener("change", () => {
   if (!activeExerciseId) return;
   updateExercise(activeExerciseId, { default_duration_minutes: parseIntOrNull(exerciseModalDuration.value) });
-});
-exerciseModalPoints.addEventListener("change", () => {
-  if (!activeExerciseId) return;
-  const points = parseIntOrNull(exerciseModalPoints.value);
-  updateExercise(activeExerciseId, { points_value: points === null ? 0 : points });
 });
 
 exerciseModalNotes.addEventListener("blur", () => {
@@ -502,6 +749,8 @@ exerciseAttachmentInput.addEventListener("change", async () => {
   const files = [...exerciseAttachmentInput.files];
   exerciseAttachmentInput.value = "";
   if (!files.length || !activeExerciseId) return;
+  const ex = exerciseById(activeExerciseId);
+  if (!ex || !isExerciseEditable(ex)) return;
   exerciseAttachmentError.textContent = "";
 
   for (const file of files) {
@@ -599,13 +848,160 @@ exerciseCategoryFilters.addEventListener("click", (e) => {
   renderExercises();
 });
 
+// ---------- routines (private per profile) ----------
+addRoutineForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const name = addRoutineInput.value.trim();
+  if (!name) return;
+  addRoutineInput.value = "";
+  const { error } = await sb.from("routines").insert({ name, app_user_id: currentAppUserId, user_id: session.user.id });
+  if (error) return;
+  await loadRoutines();
+  renderAll();
+});
+
+async function updateRoutine(id, patch) {
+  await sb.from("routines").update(patch).eq("id", id);
+  await loadRoutines();
+  renderAll();
+}
+
+async function deleteRoutine(id) {
+  await sb.from("routines").delete().eq("id", id);
+  if (activeRoutineId === id) closeRoutineModal();
+  await Promise.all([loadRoutines(), loadRoutineExercises(), loadSessions()]);
+  renderAll();
+}
+
+function openRoutineModal(id) {
+  activeRoutineId = id;
+  routineModalOverlay.hidden = false;
+  renderRoutineModal();
+}
+
+function closeRoutineModal() {
+  activeRoutineId = null;
+  routineModalOverlay.hidden = true;
+}
+
+routineModalClose.addEventListener("click", closeRoutineModal);
+routineModalOverlay.addEventListener("click", (e) => {
+  if (e.target === routineModalOverlay) closeRoutineModal();
+});
+
+routineModalName.addEventListener("blur", () => {
+  const r = routineById(activeRoutineId);
+  if (!r) return;
+  const text = routineModalName.value.trim();
+  if (text && text !== r.name) updateRoutine(activeRoutineId, { name: text });
+  else if (!text) routineModalName.value = r.name;
+});
+routineModalName.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); routineModalName.blur(); }
+});
+
+routineModalSets.addEventListener("change", () => {
+  if (!activeRoutineId) return;
+  const n = parseIntOrNull(routineModalSets.value);
+  updateRoutine(activeRoutineId, { sets: n === null || n < 1 ? 1 : n });
+});
+
+routineModalPoints.addEventListener("change", () => {
+  if (!activeRoutineId) return;
+  const n = parseIntOrNull(routineModalPoints.value);
+  updateRoutine(activeRoutineId, { points_value: n === null ? 0 : n });
+});
+
+routineModalNotes.addEventListener("blur", () => {
+  if (!activeRoutineId) return;
+  const text = routineModalNotes.value.trim();
+  updateRoutine(activeRoutineId, { notes: text || null });
+});
+
+routineModalArchiveBtn.addEventListener("click", () => {
+  const r = routineById(activeRoutineId);
+  if (!r) return;
+  updateRoutine(activeRoutineId, { archived: !r.archived });
+});
+
+routineModalDeleteBtn.addEventListener("click", () => {
+  if (!activeRoutineId) return;
+  deleteRoutine(activeRoutineId);
+});
+
+routineList.addEventListener("click", (e) => {
+  const li = e.target.closest(".exercise-item");
+  if (!li) return;
+  openRoutineModal(li.dataset.id);
+});
+
+// ---------- routine-exercises (oefeningen binnen een routine) ----------
+addRoutineExerciseForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!activeRoutineId) return;
+  const exerciseId = addRoutineExerciseSelect.value;
+  if (!exerciseId) return;
+  const reps = parseIntOrNull(addRoutineExerciseReps.value);
+  const existing = routineExercisesFor(activeRoutineId);
+  const position = existing.length ? Math.max(...existing.map(re => re.position)) + 1 : 0;
+  const { error } = await sb.from("routine_exercises").insert({
+    routine_id: activeRoutineId, exercise_id: exerciseId, reps, position, user_id: session.user.id,
+  });
+  addRoutineExerciseReps.value = "";
+  if (error) return;
+  await loadRoutineExercises();
+  renderAll();
+});
+
+async function removeRoutineExercise(id) {
+  await sb.from("routine_exercises").delete().eq("id", id);
+  await loadRoutineExercises();
+  renderAll();
+}
+
+async function updateRoutineExerciseReps(id, reps) {
+  await sb.from("routine_exercises").update({ reps }).eq("id", id);
+  await loadRoutineExercises();
+  renderAll();
+}
+
+async function moveRoutineExercise(id, direction) {
+  const list = routineExercisesFor(activeRoutineId);
+  const idx = list.findIndex(re => re.id === id);
+  if (idx === -1) return;
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= list.length) return;
+  const a = list[idx], b = list[swapIdx];
+  await Promise.all([
+    sb.from("routine_exercises").update({ position: b.position }).eq("id", a.id),
+    sb.from("routine_exercises").update({ position: a.position }).eq("id", b.id),
+  ]);
+  await loadRoutineExercises();
+  renderAll();
+}
+
+routineExerciseList.addEventListener("click", (e) => {
+  const removeBtn = e.target.closest(".remove");
+  if (removeBtn) { removeRoutineExercise(removeBtn.dataset.id); return; }
+  const upBtn = e.target.closest(".reorder-btn.up");
+  if (upBtn) { moveRoutineExercise(upBtn.dataset.id, "up"); return; }
+  const downBtn = e.target.closest(".reorder-btn.down");
+  if (downBtn) { moveRoutineExercise(downBtn.dataset.id, "down"); }
+});
+
+routineExerciseList.addEventListener("change", (e) => {
+  const input = e.target.closest(".reps-input");
+  if (!input) return;
+  updateRoutineExerciseReps(input.dataset.id, parseIntOrNull(input.value));
+});
+
 // ---------- sessions ----------
 async function setSessionStatus(id, status) {
   const patch = { status };
   if (status === "done") {
     const s = sessions.find(x => x.id === id);
-    const ex = s ? exerciseById(s.exercise_id) : null;
-    patch.points_awarded = ex ? ex.points_value : 0;
+    const r = s ? routineById(s.routine_id) : null;
+    patch.points_awarded = r ? r.points_value : 0;
     patch.completed_at = new Date().toISOString();
   } else {
     patch.points_awarded = null;
@@ -622,10 +1018,11 @@ function toggleSessionStatus(id, targetStatus) {
   setSessionStatus(id, s.status === targetStatus ? "planned" : targetStatus);
 }
 
-async function addSessionToDay(dateStr, exerciseId, time) {
+async function addSessionToDay(dateStr, routineId, time) {
   const { error } = await sb.from("sessions").insert({
     user_id: session.user.id,
-    exercise_id: exerciseId,
+    app_user_id: currentAppUserId,
+    routine_id: routineId,
     scheduled_date: dateStr,
     scheduled_time: time || null,
     status: "planned",
@@ -651,7 +1048,8 @@ async function copyPreviousWeek() {
     const dayIndex = prevWeekDates.indexOf(s.scheduled_date);
     return {
       user_id: session.user.id,
-      exercise_id: s.exercise_id,
+      app_user_id: currentAppUserId,
+      routine_id: s.routine_id,
       scheduled_date: thisWeekDates[dayIndex],
       scheduled_time: s.scheduled_time,
       status: "planned",
@@ -677,9 +1075,9 @@ weekDays.addEventListener("submit", (e) => {
   e.preventDefault();
   const select = form.querySelector("select");
   const timeInput = form.querySelector('input[type="time"]');
-  const exerciseId = select.value;
-  if (!exerciseId) return;
-  addSessionToDay(form.dataset.date, exerciseId, timeInput.value);
+  const routineId = select.value;
+  if (!routineId) return;
+  addSessionToDay(form.dataset.date, routineId, timeInput.value);
   form.reset();
 });
 
@@ -710,7 +1108,7 @@ settingsForm.addEventListener("submit", async (e) => {
     weekly_reminder_time: settingsWeeklyTime.value || "18:00",
     updated_at: new Date().toISOString(),
   };
-  const { error } = await sb.from("user_settings").update(patch).eq("user_id", session.user.id);
+  const { error } = await sb.from("user_settings").update(patch).eq("app_user_id", currentAppUserId);
   settingsMessage.textContent = error ? "Opslaan mislukt." : "Opgeslagen.";
   await loadUserSettings();
   renderAll();
@@ -727,6 +1125,25 @@ async function removePushSubscription(id) {
   await loadPushSubscriptions();
   renderAll();
 }
+
+async function sendTestReminder(type) {
+  testReminderMessage.textContent = "Bezig met versturen...";
+  const { data, error } = await sb.functions.invoke("send-reminders", {
+    body: { mode: "test", type, app_user_id: currentAppUserId },
+  });
+  if (error) {
+    testReminderMessage.textContent = "Mislukt: " + error.message;
+    return;
+  }
+  if (data && data.ok === false) {
+    testReminderMessage.textContent = data.error || "Mislukt.";
+    return;
+  }
+  testReminderMessage.textContent = `Testmelding verstuurd naar ${data && data.sent_to != null ? data.sent_to : "?"} toestel(len).`;
+}
+
+testDailyReminderBtn.addEventListener("click", () => sendTestReminder("daily"));
+testWeeklyReminderBtn.addEventListener("click", () => sendTestReminder("weekly"));
 
 // ---------- web push ----------
 function urlBase64ToUint8Array(base64String) {
@@ -765,7 +1182,7 @@ async function enablePushNotifications() {
     });
     const { endpoint, keys } = sub.toJSON();
     await sb.from("push_subscriptions").upsert({
-      user_id: session.user.id, endpoint, p256dh: keys.p256dh, auth_key: keys.auth,
+      user_id: session.user.id, app_user_id: currentAppUserId, endpoint, p256dh: keys.p256dh, auth_key: keys.auth,
       user_agent: navigator.userAgent,
     }, { onConflict: "endpoint" });
     await loadPushSubscriptions();
@@ -792,7 +1209,7 @@ async function trySilentPushResubscribe() {
     }
     const { endpoint, keys } = sub.toJSON();
     await sb.from("push_subscriptions").upsert({
-      user_id: session.user.id, endpoint, p256dh: keys.p256dh, auth_key: keys.auth,
+      user_id: session.user.id, app_user_id: currentAppUserId, endpoint, p256dh: keys.p256dh, auth_key: keys.auth,
       user_agent: navigator.userAgent,
     }, { onConflict: "endpoint" });
     await loadPushSubscriptions();
@@ -817,17 +1234,23 @@ function renderAll() {
   sidebar.querySelectorAll(".sidebar-item").forEach(el => el.classList.toggle("active", el.dataset.view === view));
   todayView.hidden = view !== "today";
   weekView.hidden = view !== "week";
+  routinesView.hidden = view !== "routines";
   exercisesView.hidden = view !== "exercises";
   settingsView.hidden = view !== "settings";
 
   if (view === "today") renderToday();
   else if (view === "week") renderWeek();
+  else if (view === "routines") renderRoutines();
   else if (view === "exercises") renderExercises();
   else if (view === "settings") renderSettings();
 
   if (activeExerciseId) {
     if (exercises.some(e => e.id === activeExerciseId)) renderExerciseModal();
     else closeExerciseModal();
+  }
+  if (activeRoutineId) {
+    if (routines.some(r => r.id === activeRoutineId)) renderRoutineModal();
+    else closeRoutineModal();
   }
 }
 
@@ -844,15 +1267,14 @@ function renderToday() {
   streakValue.innerHTML = `${computeStreak()}<span class="stat-unit">dagen</span>`;
 
   todaySessionList.innerHTML = todaySessions.map(s => {
-    const ex = exerciseById(s.exercise_id);
-    const cat = ex ? categoryById(ex.category_id) : null;
+    const r = routineById(s.routine_id);
     const badges = [];
-    if (cat) badges.push(`<span class="meta-badge cat" style="--cat-color:${cat.color}">${escapeHtml(cat.name)}</span>`);
     if (s.scheduled_time) badges.push(`<span class="meta-badge">${formatTime(s.scheduled_time)}</span>`);
-    if (ex) badges.push(`<span class="meta-badge">${ex.points_value} pt</span>`);
+    if (r) badges.push(`<span class="meta-badge">${r.sets} set${r.sets === 1 ? "" : "s"}</span>`);
+    if (r) badges.push(`<span class="meta-badge">${r.points_value} pt</span>`);
     return `<li class="session-item ${s.status}" data-id="${s.id}">
       <div class="session-main">
-        <span class="session-name">${escapeHtml(ex ? ex.name : "Verwijderde oefening")}</span>
+        <span class="session-name">${escapeHtml(r ? r.name : "Verwijderde routine")}</span>
         <div class="session-meta">${badges.join("")}</div>
       </div>
       <div class="session-actions">
@@ -869,8 +1291,8 @@ function renderWeek() {
   const dates = weekDates();
   weekLabel.textContent = formatWeekRange(dates[0], dates[6]);
   const todayStr = toDateStr(new Date());
-  const activeExercises = exercises.filter(e => !e.archived);
-  const exerciseOptionsHtml = activeExercises.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("");
+  const activeRoutines = routines.filter(r => !r.archived);
+  const routineOptionsHtml = activeRoutines.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
 
   weekDays.innerHTML = dates.map((d, i) => {
     const dateStr = toDateStr(d);
@@ -878,11 +1300,10 @@ function renderWeek() {
     const isToday = dateStr === todayStr;
 
     const itemsHtml = daySessions.map(s => {
-      const ex = exerciseById(s.exercise_id);
-      const cat = ex ? categoryById(ex.category_id) : null;
-      return `<li class="day-session-item${s.status === "done" ? " done" : ""}" data-id="${s.id}"${cat ? ` style="--cat-color:${cat.color}"` : ""}>
+      const r = routineById(s.routine_id);
+      return `<li class="day-session-item${s.status === "done" ? " done" : ""}" data-id="${s.id}">
         <span class="dot"></span>
-        <span class="name">${escapeHtml(ex ? ex.name : "Verwijderde oefening")}</span>
+        <span class="name">${escapeHtml(r ? r.name : "Verwijderde routine")}</span>
         ${s.scheduled_time ? `<span class="time">${formatTime(s.scheduled_time)}</span>` : ""}
         <button type="button" class="remove" data-id="${s.id}" aria-label="Verwijderen">×</button>
       </li>`;
@@ -896,8 +1317,8 @@ function renderWeek() {
       <ul class="day-sessions">${itemsHtml}</ul>
       <form class="day-add-form" data-date="${dateStr}">
         <select required>
-          <option value="">${activeExercises.length ? "Kies oefening..." : "Geen oefeningen"}</option>
-          ${exerciseOptionsHtml}
+          <option value="">${activeRoutines.length ? "Kies routine..." : "Geen routines"}</option>
+          ${routineOptionsHtml}
         </select>
         <input type="time">
         <button type="submit">+ Toevoegen</button>
@@ -926,9 +1347,10 @@ function renderExercises() {
 
   exerciseList.innerHTML = sorted.map(e => {
     const cat = categoryById(e.category_id);
+    const creator = appUserById(e.created_by_app_user_id);
     const badges = [];
     if (cat) badges.push(`<span class="meta-badge cat" style="--cat-color:${cat.color}">${escapeHtml(cat.name)}</span>`);
-    badges.push(`<span class="meta-badge">${e.points_value} pt</span>`);
+    if (creator) badges.push(`<span class="meta-badge">${escapeHtml(creator.name)}</span>`);
     if (e.archived) badges.push(`<span class="meta-badge">Gearchiveerd</span>`);
     return `<li class="exercise-item${e.archived ? " archived" : ""}" data-id="${e.id}">
       <div class="exercise-main">
@@ -943,20 +1365,34 @@ function renderExercises() {
 function renderExerciseModal() {
   const ex = exerciseById(activeExerciseId);
   if (!ex) return;
+  const editable = isExerciseEditable(ex);
+
   if (document.activeElement !== exerciseModalName) exerciseModalName.value = ex.name;
   populateCategorySelect(exerciseModalCategory, ex.category_id);
-  if (document.activeElement !== exerciseModalSets) exerciseModalSets.value = ex.default_sets ?? "";
-  if (document.activeElement !== exerciseModalReps) exerciseModalReps.value = ex.default_reps ?? "";
   if (document.activeElement !== exerciseModalDuration) exerciseModalDuration.value = ex.default_duration_minutes ?? "";
-  if (document.activeElement !== exerciseModalPoints) exerciseModalPoints.value = ex.points_value ?? 10;
   if (document.activeElement !== exerciseModalNotes) exerciseModalNotes.value = ex.notes || "";
   if (document.activeElement !== exerciseModalVideoUrl) exerciseModalVideoUrl.value = ex.video_url || "";
   exerciseModalVideoEmbed.innerHTML = ex.video_url ? videoEmbedHtml(ex.video_url) : "";
   exerciseModalArchiveBtn.textContent = ex.archived ? "Herstel" : "Archiveer";
+
+  const creator = appUserById(ex.created_by_app_user_id);
+  exerciseModalOwnerBadge.hidden = !creator;
+  exerciseModalOwnerBadge.textContent = creator ? `Aangemaakt door ${creator.name}` : "";
+
+  [exerciseModalName, exerciseModalCategory, exerciseModalDuration, exerciseModalNotes, exerciseModalVideoUrl].forEach(el => {
+    el.disabled = !editable;
+  });
+  exerciseModalArchiveBtn.hidden = !editable;
+  exerciseModalDeleteBtn.hidden = !editable;
+  const uploadLabel = exerciseAttachmentInput.closest("label");
+  if (uploadLabel) uploadLabel.hidden = !editable;
+
   renderExerciseModalAttachments(activeExerciseId);
 }
 
 async function renderExerciseModalAttachments(exerciseId) {
+  const ex = exerciseById(exerciseId);
+  const editable = ex ? isExerciseEditable(ex) : false;
   const items = exerciseAttachments.filter(a => a.exercise_id === exerciseId);
   exerciseAttachmentsEl.innerHTML = "";
 
@@ -981,16 +1417,63 @@ async function renderExerciseModalAttachments(exerciseId) {
     name.textContent = a.file_name;
     card.appendChild(name);
 
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "delete";
-    del.dataset.id = a.id;
-    del.setAttribute("aria-label", "Verwijderen");
-    del.textContent = "×";
-    card.appendChild(del);
+    if (editable) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "delete";
+      del.dataset.id = a.id;
+      del.setAttribute("aria-label", "Verwijderen");
+      del.textContent = "×";
+      card.appendChild(del);
+    }
 
     exerciseAttachmentsEl.appendChild(card);
   }
+}
+
+function renderRoutines() {
+  const sorted = [...routines].sort((a, b) => (a.archived === b.archived ? 0 : a.archived ? 1 : -1));
+  routineList.innerHTML = sorted.map(r => {
+    const count = routineExercisesFor(r.id).length;
+    const badges = [
+      `<span class="meta-badge">${r.sets} set${r.sets === 1 ? "" : "s"}</span>`,
+      `<span class="meta-badge">${r.points_value} pt</span>`,
+      `<span class="meta-badge">${count} oefening${count === 1 ? "" : "en"}</span>`,
+    ];
+    if (r.archived) badges.push(`<span class="meta-badge">Gearchiveerd</span>`);
+    return `<li class="exercise-item${r.archived ? " archived" : ""}" data-id="${r.id}">
+      <div class="exercise-main">
+        <span class="exercise-name">${escapeHtml(r.name)}</span>
+        <div class="session-meta">${badges.join("")}</div>
+      </div>
+    </li>`;
+  }).join("");
+  routineEmptyState.classList.toggle("visible", sorted.length === 0);
+}
+
+function renderRoutineModal() {
+  const r = routineById(activeRoutineId);
+  if (!r) return;
+  if (document.activeElement !== routineModalName) routineModalName.value = r.name;
+  if (document.activeElement !== routineModalSets) routineModalSets.value = r.sets ?? 1;
+  if (document.activeElement !== routineModalPoints) routineModalPoints.value = r.points_value ?? 10;
+  if (document.activeElement !== routineModalNotes) routineModalNotes.value = r.notes || "";
+  routineModalArchiveBtn.textContent = r.archived ? "Herstel" : "Archiveer";
+
+  const items = routineExercisesFor(r.id);
+  routineExerciseList.innerHTML = items.map((re, i) => {
+    const ex = exerciseById(re.exercise_id);
+    return `<li class="routine-exercise-item" data-id="${re.id}">
+      <span class="name">${escapeHtml(ex ? ex.name : "Verwijderde oefening")}</span>
+      <input class="reps-input" type="number" min="0" step="1" placeholder="Reps" value="${re.reps ?? ""}" data-id="${re.id}">
+      <button type="button" class="reorder-btn up" data-id="${re.id}" aria-label="Omhoog"${i === 0 ? " disabled" : ""}>↑</button>
+      <button type="button" class="reorder-btn down" data-id="${re.id}" aria-label="Omlaag"${i === items.length - 1 ? " disabled" : ""}>↓</button>
+      <button type="button" class="remove" data-id="${re.id}" aria-label="Verwijderen">×</button>
+    </li>`;
+  }).join("");
+
+  const activeExercises = exercises.filter(e => !e.archived);
+  addRoutineExerciseSelect.innerHTML = activeExercises.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("");
 }
 
 function shortenUserAgent(ua) {
@@ -998,6 +1481,9 @@ function shortenUserAgent(ua) {
 }
 
 function renderSettings() {
+  const profile = currentAppUser();
+  currentProfileHint.textContent = profile ? `Ingelogd als ${profile.name}.` : "";
+
   if (!userSettings) return;
   if (document.activeElement !== settingsTimezone) settingsTimezone.value = userSettings.timezone;
   settingsDailyEnabled.checked = userSettings.daily_reminder_enabled;

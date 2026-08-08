@@ -28,6 +28,35 @@
   </div>
 </div>
 
+<div id="profileScreen" class="auth-screen" hidden>
+  <div class="auth-card">
+    <h1>Wie ben je?</h1>
+
+    <div class="profile-tiles" id="profileTiles"></div>
+
+    <div class="profile-code-prompt" id="profileCodePrompt" hidden>
+      <p class="profile-code-name" id="profileCodePromptName"></p>
+      <form id="profileCodeForm" class="auth-form">
+        <input id="profileCodeInput" type="password" placeholder="Code" required autocomplete="off">
+        <button type="submit">Verder</button>
+      </form>
+      <button type="button" class="modal-secondary-btn" id="profileCodeCancelBtn">Terug</button>
+    </div>
+
+    <button type="button" class="settings-save-btn profile-new-btn" id="newProfileBtn">+ Nieuw profiel</button>
+
+    <form id="newProfileForm" class="auth-form" hidden>
+      <input id="newProfileName" type="text" placeholder="Naam" required autocomplete="off">
+      <input id="newProfileCode" type="password" placeholder="Code (min. 4 tekens)" required autocomplete="off" minlength="4">
+      <input id="newProfileCodeConfirm" type="password" placeholder="Code herhalen" required autocomplete="off" minlength="4">
+      <button type="submit">Profiel aanmaken</button>
+      <button type="button" class="modal-secondary-btn" id="newProfileCancelBtn">Annuleren</button>
+    </form>
+
+    <p class="auth-message" id="profileMessage"></p>
+  </div>
+</div>
+
 <div class="app" id="app" hidden>
   <header class="header">
     <h1>Fit Planner</h1>
@@ -41,6 +70,7 @@
     <aside class="sidebar" id="sidebar">
       <button class="sidebar-item active" data-view="today">Vandaag</button>
       <button class="sidebar-item" data-view="week">Deze week</button>
+      <button class="sidebar-item" data-view="routines">Routines</button>
       <button class="sidebar-item" data-view="exercises">Oefeningen</button>
       <button class="sidebar-item" data-view="settings">Instellingen</button>
     </aside>
@@ -81,6 +111,19 @@
         <div class="week-days" id="weekDays"></div>
       </section>
 
+      <!-- ---------- Routines ---------- -->
+      <section id="routinesView" class="view" hidden>
+        <h2 class="view-title">Routines</h2>
+
+        <form id="addRoutineForm" class="add-form">
+          <input id="addRoutineInput" type="text" placeholder="Nieuwe routine..." autocomplete="off" required>
+          <button type="submit" aria-label="Toevoegen">+</button>
+        </form>
+
+        <ul class="exercise-list" id="routineList"></ul>
+        <p class="empty-state" id="routineEmptyState">Nog geen routines. Maak er hierboven een aan.</p>
+      </section>
+
       <!-- ---------- Oefeningen ---------- -->
       <section id="exercisesView" class="view" hidden>
         <h2 class="view-title">Oefeningen</h2>
@@ -105,6 +148,12 @@
       <!-- ---------- Instellingen ---------- -->
       <section id="settingsView" class="view" hidden>
         <h2 class="view-title">Instellingen</h2>
+
+        <section class="settings-section">
+          <h3>Profiel</h3>
+          <p class="settings-hint" id="currentProfileHint"></p>
+          <button type="button" class="settings-save-btn" id="switchProfileBtn">Wissel gebruiker</button>
+        </section>
 
         <form id="settingsForm" class="settings-form">
           <section class="settings-section">
@@ -156,6 +205,14 @@
           <button type="button" id="enablePushBtn" class="settings-save-btn">Meldingen inschakelen op dit toestel</button>
           <ul class="device-list" id="deviceList"></ul>
         </section>
+
+        <section class="settings-section">
+          <h3>Testmeldingen</h3>
+          <p class="settings-hint">Stuur meteen een testmelding naar dit profiel se toestellen, zonder op het schema te wachten.</p>
+          <button type="button" class="settings-save-btn" id="testDailyReminderBtn">Test dagelijkse melding</button>
+          <button type="button" class="settings-save-btn" id="testWeeklyReminderBtn">Test wekelijkse melding</button>
+          <p class="settings-message" id="testReminderMessage"></p>
+        </section>
       </section>
     </main>
   </div>
@@ -166,6 +223,7 @@
     <button class="modal-close" id="exerciseModalClose" aria-label="Sluiten">×</button>
 
     <input id="exerciseModalName" class="modal-title" type="text" placeholder="Naam van de oefening/sport...">
+    <span class="modal-owner-badge" id="exerciseModalOwnerBadge" hidden></span>
 
     <div class="modal-row">
       <select id="exerciseModalCategory" aria-label="Categorie"></select>
@@ -175,20 +233,8 @@
       <h3>Details</h3>
       <div class="exercise-detail-grid">
         <label>
-          <span>Sets</span>
-          <input id="exerciseModalSets" type="number" min="0" step="1">
-        </label>
-        <label>
-          <span>Reps</span>
-          <input id="exerciseModalReps" type="number" min="0" step="1">
-        </label>
-        <label>
           <span>Duur (min)</span>
           <input id="exerciseModalDuration" type="number" min="0" step="1">
-        </label>
-        <label>
-          <span>Punten</span>
-          <input id="exerciseModalPoints" type="number" min="0" step="1">
         </label>
       </div>
     </section>
@@ -217,6 +263,48 @@
     <div class="modal-actions">
       <button type="button" id="exerciseModalArchiveBtn" class="modal-secondary-btn"></button>
       <button type="button" id="exerciseModalDeleteBtn" class="modal-danger-btn">Verwijderen</button>
+    </div>
+  </div>
+</div>
+
+<div id="routineModalOverlay" class="modal-overlay" hidden>
+  <div class="modal" id="routineModal">
+    <button class="modal-close" id="routineModalClose" aria-label="Sluiten">×</button>
+
+    <input id="routineModalName" class="modal-title" type="text" placeholder="Naam van de routine...">
+
+    <section class="modal-section">
+      <h3>Details</h3>
+      <div class="exercise-detail-grid">
+        <label>
+          <span>Sets</span>
+          <input id="routineModalSets" type="number" min="1" step="1">
+        </label>
+        <label>
+          <span>Punten</span>
+          <input id="routineModalPoints" type="number" min="0" step="1">
+        </label>
+      </div>
+    </section>
+
+    <section class="modal-section">
+      <h3>Notities</h3>
+      <textarea id="routineModalNotes" rows="3" placeholder="Opmerkingen..."></textarea>
+    </section>
+
+    <section class="modal-section">
+      <h3>Oefeningen in deze routine</h3>
+      <ul class="routine-exercise-list" id="routineExerciseList"></ul>
+      <form id="addRoutineExerciseForm" class="add-form">
+        <select id="addRoutineExerciseSelect" aria-label="Oefening"></select>
+        <input id="addRoutineExerciseReps" type="number" min="0" step="1" placeholder="Reps" style="max-width: 90px;">
+        <button type="submit" aria-label="Oefening toevoegen">+</button>
+      </form>
+    </section>
+
+    <div class="modal-actions">
+      <button type="button" id="routineModalArchiveBtn" class="modal-secondary-btn"></button>
+      <button type="button" id="routineModalDeleteBtn" class="modal-danger-btn">Verwijderen</button>
     </div>
   </div>
 </div>

@@ -1,5 +1,19 @@
 -- Fit Planner schema. Run once in a fresh Supabase project's SQL Editor.
 -- Idempotent: safe to re-run (if not exists / drop-then-create policy style).
+--
+-- On a project that already ran an earlier version of this file (before routines
+-- and multi-user profiles existed), run supabase-schema-2-routines-multiuser.sql
+-- instead — it's a guarded, destructive-where-necessary migration for an
+-- already-provisioned project. This file is the from-scratch bootstrap.
+
+create table if not exists app_users (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  code_hash text not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, name)
+);
 
 create table if not exists exercise_categories (
   id uuid primary key default gen_random_uuid(),
@@ -13,23 +27,42 @@ create table if not exists exercises (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   category_id uuid references exercise_categories(id) on delete set null,
+  created_by_app_user_id uuid references app_users(id) on delete set null,
   name text not null,
   notes text,
-  default_sets integer,
-  default_reps integer,
   default_duration_minutes integer,
-  points_value integer not null default 10,
   video_url text,
   archived boolean not null default false,
   created_at timestamptz not null default now()
 );
--- Safety net for projects that ran an earlier version of this file before video_url existed.
-alter table exercises add column if not exists video_url text;
+
+create table if not exists routines (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  app_user_id uuid not null references app_users(id) on delete cascade,
+  name text not null,
+  notes text,
+  sets integer not null default 1,
+  points_value integer not null default 10,
+  archived boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists routine_exercises (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  routine_id uuid not null references routines(id) on delete cascade,
+  exercise_id uuid references exercises(id) on delete set null,
+  reps integer,
+  position integer not null default 0,
+  created_at timestamptz not null default now()
+);
 
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  exercise_id uuid references exercises(id) on delete set null,
+  app_user_id uuid not null references app_users(id) on delete cascade,
+  routine_id uuid references routines(id) on delete set null,
   scheduled_date date not null,
   scheduled_time time,
   status text not null default 'planned' check (status in ('planned', 'done', 'skipped')),
@@ -40,7 +73,8 @@ create table if not exists sessions (
 );
 
 create table if not exists user_settings (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  app_user_id uuid primary key references app_users(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
   timezone text not null default 'Europe/Amsterdam',
   daily_reminder_enabled boolean not null default true,
   daily_reminder_time time not null default '18:00',
@@ -55,6 +89,7 @@ create table if not exists user_settings (
 create table if not exists push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
+  app_user_id uuid not null references app_users(id) on delete cascade,
   endpoint text not null unique,
   p256dh text not null,
   auth_key text not null,
@@ -73,21 +108,37 @@ create table if not exists exercise_attachments (
   created_at timestamptz not null default now()
 );
 
+create index if not exists app_users_user_id_idx on app_users(user_id);
 create index if not exists exercises_user_id_idx on exercises(user_id);
 create index if not exists exercises_category_id_idx on exercises(category_id);
+create index if not exists exercises_created_by_app_user_id_idx on exercises(created_by_app_user_id);
+create index if not exists routines_user_id_idx on routines(user_id);
+create index if not exists routines_app_user_id_idx on routines(app_user_id);
+create index if not exists routine_exercises_routine_id_idx on routine_exercises(routine_id);
+create index if not exists routine_exercises_exercise_id_idx on routine_exercises(exercise_id);
+create index if not exists routine_exercises_user_id_idx on routine_exercises(user_id);
 create index if not exists sessions_user_id_idx on sessions(user_id);
+create index if not exists sessions_app_user_id_idx on sessions(app_user_id);
 create index if not exists sessions_scheduled_date_idx on sessions(scheduled_date);
-create index if not exists sessions_exercise_id_idx on sessions(exercise_id);
+create index if not exists sessions_routine_id_idx on sessions(routine_id);
 create index if not exists push_subscriptions_user_id_idx on push_subscriptions(user_id);
+create index if not exists push_subscriptions_app_user_id_idx on push_subscriptions(app_user_id);
 create index if not exists exercise_attachments_exercise_id_idx on exercise_attachments(exercise_id);
 create index if not exists exercise_attachments_user_id_idx on exercise_attachments(user_id);
 
+alter table app_users enable row level security;
 alter table exercise_categories enable row level security;
 alter table exercises enable row level security;
+alter table routines enable row level security;
+alter table routine_exercises enable row level security;
 alter table sessions enable row level security;
 alter table user_settings enable row level security;
 alter table push_subscriptions enable row level security;
 alter table exercise_attachments enable row level security;
+
+drop policy if exists "app_users_owner" on app_users;
+create policy "app_users_owner" on app_users
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "exercise_categories_owner" on exercise_categories;
 create policy "exercise_categories_owner" on exercise_categories
@@ -95,6 +146,14 @@ create policy "exercise_categories_owner" on exercise_categories
 
 drop policy if exists "exercises_owner" on exercises;
 create policy "exercises_owner" on exercises
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "routines_owner" on routines;
+create policy "routines_owner" on routines
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "routine_exercises_owner" on routine_exercises;
+create policy "routine_exercises_owner" on routine_exercises
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "sessions_owner" on sessions;
@@ -117,6 +176,12 @@ do $$
 begin
   if not exists (
     select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'app_users'
+  ) then
+    alter publication supabase_realtime add table app_users;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
     where pubname = 'supabase_realtime' and tablename = 'exercise_categories'
   ) then
     alter publication supabase_realtime add table exercise_categories;
@@ -126,6 +191,18 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'exercises'
   ) then
     alter publication supabase_realtime add table exercises;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'routines'
+  ) then
+    alter publication supabase_realtime add table routines;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'routine_exercises'
+  ) then
+    alter publication supabase_realtime add table routine_exercises;
   end if;
   if not exists (
     select 1 from pg_publication_tables

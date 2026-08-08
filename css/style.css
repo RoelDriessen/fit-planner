@@ -184,6 +184,51 @@ body {
   text-align: center;
 }
 
+/* ---------- profile picker ---------- */
+.profile-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.profile-tile {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 16px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.profile-tile:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.profile-code-prompt {
+  margin-bottom: 16px;
+}
+
+.profile-code-name {
+  text-align: center;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.profile-code-prompt .modal-secondary-btn,
+#newProfileForm .modal-secondary-btn {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.profile-new-btn {
+  width: 100%;
+}
+
 /* ---------- layout: sidebar + main ---------- */
 .layout {
   display: flex;
@@ -597,6 +642,78 @@ body {
   cursor: pointer;
 }
 
+/* ---------- routine-exercise list (inside routine modal) ---------- */
+.routine-exercise-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.routine-exercise-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.routine-exercise-item .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routine-exercise-item .reps-input {
+  width: 64px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.routine-exercise-item .reorder-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.routine-exercise-item .reorder-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.routine-exercise-item .remove {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+
+.routine-exercise-item .remove:hover {
+  color: var(--danger);
+}
+
 @media (min-width: 720px) {
   .week-days {
     overflow-x: visible;
@@ -838,6 +955,16 @@ body {
   outline: none;
 }
 
+.modal-owner-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+
 .modal-row {
   display: flex;
   flex-wrap: wrap;
@@ -889,6 +1016,18 @@ body {
   border-radius: 10px;
   font-size: 14px;
   outline: none;
+}
+
+.exercise-detail-grid:only-child {
+  grid-template-columns: 1fr;
+  max-width: 200px;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .modal-section textarea {

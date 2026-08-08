@@ -1,5 +1,5 @@
 export interface UserSettingsRow {
-  user_id: string;
+  app_user_id: string;
   timezone: string;
   daily_reminder_enabled: boolean;
   daily_reminder_time: string;
@@ -12,7 +12,7 @@ export interface UserSettingsRow {
 
 export interface PushSubscriptionRow {
   id: string;
-  user_id: string;
+  app_user_id: string;
   endpoint: string;
   p256dh: string;
   auth_key: string;
@@ -20,7 +20,7 @@ export interface PushSubscriptionRow {
 
 export interface SessionRow {
   id: string;
-  user_id: string;
+  app_user_id: string;
   scheduled_date: string;
   status: string;
 }
