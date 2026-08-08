@@ -13,7 +13,6 @@ const MONTH_NAMES = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "se
 const ALLOWED_MIME = ["image/png", "image/jpeg"];
 const ALLOWED_EXT = ["png", "jpg", "jpeg"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const APP_USER_STORAGE_KEY = "fitPlanner.appUserId";
 
 let session = null;
 let exerciseCategories = [];
@@ -212,19 +211,16 @@ function showAuth() {
   appEl.hidden = true;
 }
 
-// Household login succeeded. Load the data shared by the whole household
-// (categories/exercises/profiles) and decide whether to jump straight into a
-// remembered profile or show the profile picker.
+// Household login succeeded — this normally only ever happens once per
+// device/browser, since Supabase persists the session (localStorage +
+// auto-refresh) across app opens on its own; the "Toegangscode" screen isn't
+// shown again after that. Load the data shared by the whole household
+// (categories/exercises/profiles), then always show the profile picker —
+// deliberately never skipped/remembered, so a PIN is required every session.
 async function showApp() {
   authScreen.hidden = true;
   await Promise.all([loadExerciseCategories(), loadExercises(), loadAppUsers()]);
-  const savedId = localStorage.getItem(APP_USER_STORAGE_KEY);
-  if (savedId && appUsers.some(u => u.id === savedId)) {
-    currentAppUserId = savedId;
-    await enterApp();
-  } else {
-    showProfilePicker();
-  }
+  showProfilePicker();
 }
 
 // Only once a profile is active do we load that profile's own data and start
@@ -308,7 +304,6 @@ profileCodeForm.addEventListener("submit", async (e) => {
     return;
   }
   currentAppUserId = u.id;
-  localStorage.setItem(APP_USER_STORAGE_KEY, u.id);
   await enterApp();
 });
 
@@ -352,12 +347,10 @@ newProfileForm.addEventListener("submit", async (e) => {
   }
   await loadAppUsers();
   currentAppUserId = id;
-  localStorage.setItem(APP_USER_STORAGE_KEY, id);
   await enterApp();
 });
 
 switchProfileBtn.addEventListener("click", () => {
-  localStorage.removeItem(APP_USER_STORAGE_KEY);
   currentAppUserId = null;
   teardownRealtime();
   appEl.hidden = true;
@@ -445,7 +438,6 @@ function setupRealtime() {
         await loadAppUsers();
         if (currentAppUserId && !appUsers.some(u => u.id === currentAppUserId)) {
           // Our profile was deleted from another device — bail out to the picker.
-          localStorage.removeItem(APP_USER_STORAGE_KEY);
           currentAppUserId = null;
           teardownRealtime();
           appEl.hidden = true;
